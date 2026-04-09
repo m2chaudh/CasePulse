@@ -123,6 +123,8 @@ category_labels = {
     "cas_worker": "CAS Worker",
     "court": "Court",
     "daycare": "Daycare",
+    "disclosure": "Disclosure",
+    "docusign": "DocuSign",
     "employer": "Employer",
     "ex_spouse": "Ex-Spouse",
     "expenses": "Expenses",
