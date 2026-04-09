@@ -77,17 +77,19 @@ def main():
     # Dashboard stats
     stats = db.get_stats()
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
-        st.metric("Connected Accounts", stats["connected_accounts"])
+        st.metric("Accounts", stats["connected_accounts"])
     with col2:
-        st.metric("Emails Collected", f"{stats['total_emails']:,}")
+        st.metric("Emails", f"{stats['total_emails']:,}")
     with col3:
-        st.metric("Attachments", f"{stats['total_attachments']:,}")
+        st.metric("Chat Messages", f"{stats.get('total_chat_messages', 0):,}")
     with col4:
-        st.metric("Duplicates Found", f"{stats['duplicate_attachments']:,}")
+        st.metric("Attachments", f"{stats['total_attachments']:,}")
     with col5:
-        st.metric("Selected Senders", stats["selected_senders"])
+        st.metric("Duplicates", f"{stats['duplicate_attachments']:,}")
+    with col6:
+        st.metric("Senders", stats["selected_senders"])
 
     st.divider()
 

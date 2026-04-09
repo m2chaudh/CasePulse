@@ -144,19 +144,111 @@ def chunk_attachment(attachment: dict, email: dict,
     return chunks
 
 
+def chunk_chat_messages(messages: list[dict], chunk_size: int = 500,
+                        chunk_overlap: int = 50) -> list[dict]:
+    """Group chat messages into conversation chunks for RAG.
+
+    Instead of chunking individual messages (too short), groups sequential
+    messages into conversation windows for better context.
+    """
+    chunks = []
+    if not messages:
+        return chunks
+
+    # Group messages into windows of ~chunk_size words
+    window = []
+    window_words = 0
+    chunk_index = 0
+
+    for msg in messages:
+        text = msg.get("message_text", "") or ""
+        sender = msg.get("sender", "")
+        timestamp = msg.get("timestamp", "")
+        words = len(text.split())
+
+        if msg.get("is_system"):
+            continue
+
+        window.append(msg)
+        window_words += words
+
+        if window_words >= chunk_size:
+            chunk = _build_chat_chunk(window, chunk_index)
+            if chunk:
+                chunks.append(chunk)
+            # Overlap: keep last few messages
+            overlap_msgs = max(2, len(window) // 4)
+            window = window[-overlap_msgs:]
+            window_words = sum(len((m.get("message_text") or "").split()) for m in window)
+            chunk_index += 1
+
+    # Don't forget remaining messages
+    if window:
+        chunk = _build_chat_chunk(window, chunk_index)
+        if chunk:
+            chunks.append(chunk)
+
+    return chunks
+
+
+def _build_chat_chunk(messages: list[dict], chunk_index: int) -> Optional[dict]:
+    """Build a single chunk from a window of chat messages."""
+    if not messages:
+        return None
+
+    chat_name = messages[0].get("chat_name", "")
+    platform = messages[0].get("platform", "chat")
+    first_ts = messages[0].get("timestamp", "")
+    last_ts = messages[-1].get("timestamp", "")
+
+    header = f"Chat: {chat_name} ({platform})\n"
+    header += f"Period: {first_ts[:16] if first_ts else '?'} to {last_ts[:16] if last_ts else '?'}\n"
+    header += "---\n"
+
+    lines = []
+    for msg in messages:
+        ts = msg.get("timestamp", "")[:16] if msg.get("timestamp") else ""
+        sender = msg.get("sender", "?")
+        text = msg.get("message_text", "")
+        if msg.get("has_media"):
+            media_type = msg.get("media_type", "media")
+            text = text or f"[{media_type}]"
+        if text:
+            lines.append(f"[{ts}] {sender}: {text}")
+
+    if not lines:
+        return None
+
+    body = "\n".join(lines)
+    senders = list(set(m.get("sender", "") for m in messages if m.get("sender")))
+
+    return {
+        "text": header + body,
+        "metadata": {
+            "type": "chat",
+            "platform": platform,
+            "chat_name": chat_name,
+            "sender": ", ".join(senders[:5]),
+            "date": first_ts[:10] if first_ts else "",
+            "date_end": last_ts[:10] if last_ts else "",
+            "subject": chat_name,
+            "chunk_index": chunk_index,
+        },
+    }
+
+
 def build_all_chunks(db: Database, chunk_size: int = 500,
                      chunk_overlap: int = 50,
                      progress_cb=None) -> list[dict]:
-    """Build chunks from all emails and attachments in the database."""
+    """Build chunks from all emails, attachments, AND chat messages."""
     all_chunks = []
-    emails = db.get_emails(limit=100000)
 
+    # ── Email chunks ──
+    emails = db.get_emails(limit=100000)
     for i, email in enumerate(emails):
-        # Chunk the email body
         email_chunks = chunk_email(email, chunk_size, chunk_overlap)
         all_chunks.extend(email_chunks)
 
-        # Chunk attachments
         attachments = db.get_attachments_for_email(email["id"])
         for att in attachments:
             att_chunks = chunk_attachment(att, email, chunk_size, chunk_overlap)
@@ -166,7 +258,31 @@ def build_all_chunks(db: Database, chunk_size: int = 500,
             progress_cb(f"Chunked {i + 1}/{len(emails)} emails... {len(all_chunks)} chunks so far")
 
     if progress_cb:
-        progress_cb(f"Done. {len(all_chunks)} total chunks from {len(emails)} emails")
+        progress_cb(f"Emails done: {len(all_chunks)} chunks from {len(emails)} emails")
+
+    # ── Chat message chunks ──
+    chat_messages = db.get_chat_messages(limit=500000)
+    if chat_messages:
+        if progress_cb:
+            progress_cb(f"Chunking {len(chat_messages)} chat messages...")
+
+        # Group by chat_name for better context
+        chats = {}
+        for msg in chat_messages:
+            key = msg.get("chat_name", "unknown")
+            if key not in chats:
+                chats[key] = []
+            chats[key].append(msg)
+
+        for chat_name, msgs in chats.items():
+            chat_chunks = chunk_chat_messages(msgs, chunk_size, chunk_overlap)
+            all_chunks.extend(chat_chunks)
+
+        if progress_cb:
+            progress_cb(f"Chat done: {len(all_chunks)} total chunks ({len(chat_messages)} messages from {len(chats)} chats)")
+
+    if progress_cb:
+        progress_cb(f"Total: {len(all_chunks)} chunks ready for indexing")
 
     return all_chunks
 

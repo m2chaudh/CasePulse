@@ -96,6 +96,48 @@ CREATE TABLE IF NOT EXISTS sync_log (
     status TEXT DEFAULT 'running'
 );
 
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT NOT NULL,
+    source_file TEXT,
+    platform TEXT,
+    chat_name TEXT,
+    sender TEXT,
+    sender_mapped_email TEXT,
+    timestamp TEXT,
+    message_text TEXT,
+    has_media INTEGER DEFAULT 0,
+    media_type TEXT,
+    media_path TEXT,
+    content_hash TEXT,
+    is_system INTEGER DEFAULT 0,
+    import_batch TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_type TEXT,
+    platform TEXT,
+    chat_name TEXT,
+    message_count INTEGER DEFAULT 0,
+    date_start TEXT,
+    date_end TEXT,
+    participants TEXT,
+    imported_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_sender_map (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_sender TEXT NOT NULL,
+    platform TEXT,
+    mapped_email TEXT,
+    mapped_category TEXT DEFAULT 'other',
+    display_label TEXT,
+    UNIQUE(chat_sender, platform)
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_sender ON emails(sender_email);
 CREATE INDEX IF NOT EXISTS idx_emails_date ON emails(date_received);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
@@ -103,6 +145,9 @@ CREATE INDEX IF NOT EXISTS idx_emails_content_hash ON emails(content_hash);
 CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_hash ON attachments(content_hash);
 CREATE INDEX IF NOT EXISTS idx_senders_selected ON senders(selected);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender ON chat_messages(sender);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_source ON chat_messages(source_type);
 """
 
 
@@ -518,6 +563,10 @@ class Database:
             date_range = conn.execute(
                 "SELECT MIN(date_received) as earliest, MAX(date_received) as latest FROM emails"
             ).fetchone()
+            # Chat stats
+            chat_msgs = conn.execute("SELECT COUNT(*) as cnt FROM chat_messages WHERE is_system = 0").fetchone()["cnt"]
+            chat_imports = conn.execute("SELECT COUNT(*) as cnt FROM chat_imports").fetchone()["cnt"]
+
             return {
                 "total_emails": emails,
                 "total_attachments": attachments,
@@ -526,4 +575,178 @@ class Database:
                 "selected_senders": senders,
                 "earliest_email": date_range["earliest"],
                 "latest_email": date_range["latest"],
+                "total_chat_messages": chat_msgs,
+                "chat_imports": chat_imports,
             }
+
+    # ── Chat message operations ──
+
+    def insert_chat_message(self, **kwargs) -> int:
+        fields = [
+            "source_type", "source_file", "platform", "chat_name",
+            "sender", "sender_mapped_email", "timestamp", "message_text",
+            "has_media", "media_type", "media_path", "content_hash",
+            "is_system", "import_batch",
+        ]
+        data = {f: kwargs.get(f) for f in fields}
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join(["?"] * len(data))
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                f"INSERT INTO chat_messages ({cols}) VALUES ({placeholders})",
+                list(data.values())
+            )
+            return cur.lastrowid
+
+    def insert_chat_import(self, source_file: str, source_type: str,
+                           platform: str, chat_name: str,
+                           message_count: int, date_start: str,
+                           date_end: str, participants: list[str]) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO chat_imports
+                   (source_file, source_type, platform, chat_name,
+                    message_count, date_start, date_end, participants)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (source_file, source_type, platform, chat_name,
+                 message_count, date_start, date_end, json.dumps(participants))
+            )
+            return cur.lastrowid
+
+    def get_chat_imports(self) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM chat_imports ORDER BY imported_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_chat_messages(self, sender: Optional[str] = None,
+                          date_start: Optional[str] = None,
+                          date_end: Optional[str] = None,
+                          keyword: Optional[str] = None,
+                          platform: Optional[str] = None,
+                          include_system: bool = False,
+                          limit: int = 5000) -> list[dict]:
+        conditions = []
+        params = []
+
+        if not include_system:
+            conditions.append("is_system = 0")
+        if sender:
+            conditions.append("(sender = ? OR sender_mapped_email = ?)")
+            params.extend([sender, sender])
+        if date_start:
+            conditions.append("timestamp >= ?")
+            params.append(date_start)
+        if date_end:
+            conditions.append("timestamp <= ?")
+            params.append(date_end)
+        if keyword:
+            conditions.append("message_text LIKE ?")
+            params.append(f"%{keyword}%")
+        if platform:
+            conditions.append("platform = ?")
+            params.append(platform)
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+        params.append(limit)
+
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM chat_messages WHERE {where} ORDER BY timestamp ASC LIMIT ?",
+                params
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_chat_import(self, import_id: int):
+        """Delete a chat import and all its messages."""
+        with self._get_conn() as conn:
+            imp = conn.execute(
+                "SELECT source_file FROM chat_imports WHERE id = ?", (import_id,)
+            ).fetchone()
+            if imp:
+                conn.execute(
+                    "DELETE FROM chat_messages WHERE source_file = ?",
+                    (imp["source_file"],)
+                )
+            conn.execute("DELETE FROM chat_imports WHERE id = ?", (import_id,))
+
+    # ── Chat sender mapping ──
+
+    def upsert_chat_sender_map(self, chat_sender: str, platform: str,
+                                mapped_email: str = "", category: str = "other",
+                                label: str = ""):
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO chat_sender_map (chat_sender, platform, mapped_email, mapped_category, display_label)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(chat_sender, platform) DO UPDATE SET
+                   mapped_email = excluded.mapped_email,
+                   mapped_category = excluded.mapped_category,
+                   display_label = excluded.display_label""",
+                (chat_sender, platform, mapped_email, category, label)
+            )
+
+    def get_chat_sender_maps(self, platform: Optional[str] = None) -> list[dict]:
+        with self._get_conn() as conn:
+            if platform:
+                rows = conn.execute(
+                    "SELECT * FROM chat_sender_map WHERE platform = ?", (platform,)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM chat_sender_map").fetchall()
+            return [dict(r) for r in rows]
+
+    # ── Unified timeline ──
+
+    def get_unified_timeline(self, date_start: Optional[str] = None,
+                              date_end: Optional[str] = None,
+                              keyword: Optional[str] = None,
+                              sender: Optional[str] = None,
+                              limit: int = 5000) -> list[dict]:
+        """Get combined email + chat timeline, sorted chronologically."""
+        items = []
+
+        # Emails
+        emails = self.get_emails(
+            date_start=date_start, date_end=date_end,
+            keyword=keyword, sender_email=sender, limit=limit,
+        )
+        for e in emails:
+            items.append({
+                "type": "email",
+                "timestamp": e.get("date_received", ""),
+                "sender": e.get("sender_email", ""),
+                "sender_name": e.get("sender_name", ""),
+                "subject": e.get("subject", ""),
+                "body_preview": (e.get("body_text", "") or "")[:300],
+                "direction": e.get("direction", ""),
+                "is_forwarded": bool(e.get("is_forwarded")),
+                "has_attachments": bool(e.get("has_attachments")),
+                "source_id": e["id"],
+                "platform": "email",
+            })
+
+        # Chat messages
+        chat_msgs = self.get_chat_messages(
+            date_start=date_start, date_end=date_end,
+            keyword=keyword, sender=sender, limit=limit,
+        )
+        for m in chat_msgs:
+            items.append({
+                "type": "chat",
+                "timestamp": m.get("timestamp", ""),
+                "sender": m.get("sender", ""),
+                "sender_name": m.get("sender", ""),
+                "subject": m.get("chat_name", ""),
+                "body_preview": (m.get("message_text", "") or "")[:300],
+                "direction": "",
+                "is_forwarded": False,
+                "has_attachments": bool(m.get("has_media")),
+                "source_id": m["id"],
+                "platform": m.get("platform", "chat"),
+            })
+
+        # Sort by timestamp
+        items.sort(key=lambda x: x["timestamp"] or "")
+        return items[:limit]

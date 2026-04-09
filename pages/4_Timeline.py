@@ -13,7 +13,7 @@ from casepulse.config import Config
 st.set_page_config(page_title="CasePulse - Timeline", page_icon="CP", layout="wide")
 
 st.markdown("## Timeline")
-st.markdown("Chronological view of all collected emails.")
+st.markdown("Chronological view of all emails and chat messages.")
 
 
 def init():
@@ -28,8 +28,8 @@ db: Database = st.session_state.db
 config: Config = st.session_state.config
 
 stats = db.get_stats()
-if stats["total_emails"] == 0:
-    st.info("No emails collected yet. Go to **Fetch Emails** to download emails.")
+if stats["total_emails"] == 0 and stats.get("total_chat_messages", 0) == 0:
+    st.info("No data collected yet. Go to **Fetch Emails** or **Import Chats** first.")
     st.stop()
 
 # ── Filters ──
@@ -51,7 +51,7 @@ with col2:
 with col3:
     filter_keyword = st.text_input("Search", placeholder="Search emails...", key="tl_search")
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     selected_senders = db.get_senders(selected_only=True)
     sender_options = ["All senders"] + [s["email"] for s in selected_senders]
@@ -60,8 +60,10 @@ with col2:
     filter_direction = st.selectbox("Direction", ["All", "received", "sent"], key="tl_dir")
 with col3:
     filter_attachments = st.selectbox("Attachments", ["All", "With attachments", "Without attachments"], key="tl_att")
+with col4:
+    filter_source = st.selectbox("Source", ["All", "Emails only", "Chats only"], key="tl_source")
 
-# ── Fetch emails ──
+# ── Fetch data ──
 sender_email = None if filter_sender == "All senders" else filter_sender
 direction = None if filter_direction == "All" else filter_direction
 has_att = None
@@ -70,6 +72,51 @@ if filter_attachments == "With attachments":
 elif filter_attachments == "Without attachments":
     has_att = False
 
+# Use unified timeline
+if filter_source == "All":
+    timeline_items = db.get_unified_timeline(
+        date_start=str(filter_start),
+        date_end=str(filter_end),
+        keyword=filter_keyword if filter_keyword else None,
+        sender=sender_email,
+        limit=5000,
+    )
+elif filter_source == "Emails only":
+    emails_raw = db.get_emails(
+        sender_email=sender_email,
+        date_start=str(filter_start),
+        date_end=str(filter_end),
+        keyword=filter_keyword if filter_keyword else None,
+        direction=direction,
+        has_attachments=has_att,
+        limit=5000,
+    )
+    timeline_items = [{
+        "type": "email", "timestamp": e.get("date_received", ""),
+        "sender": e.get("sender_email", ""), "sender_name": e.get("sender_name", ""),
+        "subject": e.get("subject", ""), "body_preview": (e.get("body_text", "") or "")[:300],
+        "direction": e.get("direction", ""), "is_forwarded": bool(e.get("is_forwarded")),
+        "has_attachments": bool(e.get("has_attachments")), "source_id": e["id"],
+        "platform": "email",
+    } for e in emails_raw]
+else:
+    chat_raw = db.get_chat_messages(
+        date_start=str(filter_start),
+        date_end=str(filter_end),
+        keyword=filter_keyword if filter_keyword else None,
+        sender=sender_email,
+        limit=5000,
+    )
+    timeline_items = [{
+        "type": "chat", "timestamp": m.get("timestamp", ""),
+        "sender": m.get("sender", ""), "sender_name": m.get("sender", ""),
+        "subject": m.get("chat_name", ""), "body_preview": (m.get("message_text", "") or "")[:300],
+        "direction": "", "is_forwarded": False,
+        "has_attachments": bool(m.get("has_media")), "source_id": m["id"],
+        "platform": m.get("platform", "chat"),
+    } for m in chat_raw]
+
+# Also keep emails reference for attachment lookups below
 emails = db.get_emails(
     sender_email=sender_email,
     date_start=str(filter_start),
@@ -80,23 +127,24 @@ emails = db.get_emails(
     limit=5000,
 )
 
-st.markdown(f"**{len(emails)} emails** in timeline")
+email_count = sum(1 for t in timeline_items if t["type"] == "email")
+chat_count = sum(1 for t in timeline_items if t["type"] == "chat")
+st.markdown(f"**{len(timeline_items)} items** in timeline ({email_count} emails, {chat_count} chat messages)")
 
 st.divider()
 
 # ── Visual Timeline Chart ──
-if emails and len(emails) > 1:
+if timeline_items and len(timeline_items) > 1:
     try:
         import plotly.express as px
-        import plotly.graph_objects as go
+        import pandas as pd
 
         # Build timeline data
         timeline_data = []
-        for e in emails:
-            dt = e.get("date_received", "")
+        for item in timeline_items:
+            dt = item.get("timestamp", "")
             if not dt:
                 continue
-            # Parse date
             try:
                 if "T" in dt:
                     parsed_date = datetime.fromisoformat(dt.replace("Z", "+00:00"))
@@ -105,27 +153,31 @@ if emails and len(emails) > 1:
             except (ValueError, TypeError):
                 continue
 
-            sender = e.get("sender_email", "unknown")
+            sender = item.get("sender", "unknown")
+            item_type = item.get("type", "email")
+            label = item.get("subject", "") or item.get("body_preview", "")[:60]
             timeline_data.append({
                 "date": parsed_date,
                 "sender": sender,
-                "subject": (e.get("subject", "")[:60] + "...") if len(e.get("subject", "")) > 60 else e.get("subject", ""),
-                "direction": e.get("direction", ""),
-                "has_att": "Yes" if e.get("has_attachments") else "No",
+                "label": (label[:60] + "...") if len(label) > 60 else label,
+                "type": item_type,
+                "platform": item.get("platform", ""),
             })
 
         if timeline_data:
-            import pandas as pd
             df = pd.DataFrame(timeline_data)
 
             fig = px.scatter(
                 df,
                 x="date",
                 y="sender",
-                color="direction",
-                hover_data=["subject", "has_att"],
-                title="Email Timeline",
-                color_discrete_map={"received": "#00d4ff", "sent": "#ff6b6b"},
+                color="type",
+                hover_data=["label", "platform"],
+                title="Communication Timeline",
+                color_discrete_map={
+                    "email": "#00d4ff",
+                    "chat": "#ff9f43",
+                },
             )
             fig.update_layout(
                 height=max(300, len(df["sender"].unique()) * 30 + 100),
