@@ -570,8 +570,8 @@ with st.expander("Auto-Tag with AI", expanded=False):
         key="ai_tag_scope",
     )
 
-    ai_batch_size = st.slider("Contacts per batch", 10, 100, 30, key="ai_batch_size",
-                               help="Larger batches are faster but may hit LLM token limits")
+    ai_batch_size = st.slider("Contacts per batch", 5, 50, 15, key="ai_batch_size",
+                               help="Smaller = more frequent progress updates. Larger = fewer LLM calls but slower feedback.")
 
     if st.button("Run AI Auto-Tag", type="primary", key="run_ai_tag"):
         # Determine which contacts to tag
@@ -593,17 +593,20 @@ with st.expander("Auto-Tag with AI", expanded=False):
             contact_infos = []
             for s in to_tag:
                 subjects = conn.execute(
-                    "SELECT subject FROM emails WHERE sender_email = ? ORDER BY date_received DESC LIMIT 5",
+                    "SELECT subject FROM emails WHERE sender_email = ? ORDER BY date_received DESC LIMIT 3",
                     (s["email"],)
                 ).fetchall()
-                subj_list = [r["subject"] for r in subjects if r["subject"]]
+                subj_list = [r["subject"][:50] for r in subjects if r["subject"]]
                 contact_infos.append({
                     "id": s["id"],
                     "email": s["email"],
                     "name": s.get("display_name") or "",
-                    "subjects": subj_list[:5],
+                    "subjects": subj_list,
                 })
             conn.close()
+
+            st.info(f"Tagging {len(contact_infos)} contacts in batches of {ai_batch_size}. "
+                    f"Estimated: {(len(contact_infos) + ai_batch_size - 1) // ai_batch_size} LLM calls.")
 
             # Build LLM
             from casepulse.llm.api_provider import create_provider
@@ -637,19 +640,12 @@ with st.expander("Auto-Tag with AI", expanded=False):
                     subj_str = "; ".join(c["subjects"]) if c["subjects"] else "no emails fetched"
                     contacts_text += f"{i+1}. Email: {c['email']}, Name: {c['name']}, Recent subjects: {subj_str}\n"
 
-                prompt = f"""Categorize these contacts for a family law and criminal defence case.
+                prompt = f"""Categorize these contacts. Categories: {cat_list}
 
-Available categories: {cat_list}
+Rules: 1-3 categories per contact, confidence 0-100%. Use email domain, name, subjects as clues.
+Format EXACTLY (one line each, no extra text):
+1. cat1,cat2 | 85%
 
-For each contact, suggest 1-3 categories and a confidence percentage (0-100%).
-Consider: the email domain, the person's name, and their email subjects.
-
-Respond in EXACTLY this format, one line per contact, no extra text:
-1. category1,category2 | 85%
-2. category1 | 60%
-...
-
-Contacts:
 {contacts_text}"""
 
                 try:
