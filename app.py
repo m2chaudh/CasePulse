@@ -70,6 +70,12 @@ def main():
     db: Database = st.session_state.db
     config: Config = st.session_state.config
 
+    # PIN lock gate
+    from casepulse.legal.pin_lock import render_pin_gate, is_pin_set
+    if not render_pin_gate(db):
+        st.stop()
+        return
+
     # Header
     st.markdown('<p class="main-header">CasePulse</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Legal Email Aggregation & Analysis</p>', unsafe_allow_html=True)
@@ -189,6 +195,41 @@ def main():
                 base_url = st.text_input("Base URL", value=config.llm_base_url)
                 if base_url != config.llm_base_url:
                     config.set("llm.base_url", base_url)
+
+        st.markdown("#### App Security")
+        from casepulse.legal.pin_lock import is_pin_set, set_pin, remove_pin
+        if is_pin_set(db):
+            st.success("PIN lock is enabled.")
+            col1, col2 = st.columns(2)
+            with col1:
+                current_pin = st.text_input("Current PIN", type="password", key="current_pin")
+            with col2:
+                new_pin = st.text_input("New PIN (leave blank to remove)", type="password", key="new_pin_change")
+            if st.button("Update PIN"):
+                if new_pin:
+                    from casepulse.legal.pin_lock import verify_pin
+                    if verify_pin(db, current_pin):
+                        set_pin(db, new_pin)
+                        st.success("PIN updated!")
+                    else:
+                        st.error("Current PIN is incorrect.")
+                else:
+                    if remove_pin(db, current_pin):
+                        st.success("PIN removed.")
+                        st.rerun()
+                    else:
+                        st.error("Current PIN is incorrect.")
+        else:
+            st.info("No PIN set. Set one to protect your data.")
+            new_pin = st.text_input("Set PIN", type="password", key="new_pin_set",
+                                     help="4-20 characters. Required every time you open CasePulse.")
+            if st.button("Enable PIN Lock") and new_pin:
+                if len(new_pin) >= 4:
+                    set_pin(db, new_pin)
+                    st.success("PIN lock enabled!")
+                    st.rerun()
+                else:
+                    st.error("PIN must be at least 4 characters.")
 
 
 if __name__ == "__main__":

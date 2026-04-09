@@ -138,6 +138,52 @@ CREATE TABLE IF NOT EXISTS chat_sender_map (
     UNIQUE(chat_sender, platform)
 );
 
+CREATE TABLE IF NOT EXISTS cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    case_type TEXT NOT NULL,
+    case_number TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    exhibit_format TEXT DEFAULT 'alpha',
+    exhibit_prefix TEXT DEFAULT '',
+    next_exhibit_num INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS evidence_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_type TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    case_id INTEGER REFERENCES cases(id),
+    legal_issue TEXT DEFAULT '',
+    exhibit_label TEXT DEFAULT '',
+    flag TEXT DEFAULT 'none',
+    collection TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(item_type, item_id, case_id)
+);
+
+CREATE TABLE IF NOT EXISTS annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_type TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    case_id INTEGER REFERENCES cases(id),
+    note_text TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_sender ON emails(sender_email);
 CREATE INDEX IF NOT EXISTS idx_emails_date ON emails(date_received);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
@@ -148,6 +194,9 @@ CREATE INDEX IF NOT EXISTS idx_senders_selected ON senders(selected);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_sender ON chat_messages(sender);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_source ON chat_messages(source_type);
+CREATE INDEX IF NOT EXISTS idx_evidence_tags_item ON evidence_tags(item_type, item_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_tags_case ON evidence_tags(case_id);
+CREATE INDEX IF NOT EXISTS idx_annotations_item ON annotations(item_type, item_id);
 """
 
 
@@ -750,3 +799,213 @@ class Database:
         # Sort by timestamp
         items.sort(key=lambda x: x["timestamp"] or "")
         return items[:limit]
+
+    # ── Case operations ──
+
+    def create_case(self, name: str, case_type: str, case_number: str = "",
+                    description: str = "", exhibit_format: str = "alpha",
+                    exhibit_prefix: str = "") -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO cases (name, case_type, case_number, description,
+                   exhibit_format, exhibit_prefix)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (name, case_type, case_number, description, exhibit_format, exhibit_prefix)
+            )
+            return cur.lastrowid
+
+    def get_cases(self) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM cases ORDER BY created_at").fetchall()
+            return [dict(r) for r in rows]
+
+    def get_case(self, case_id: int) -> Optional[dict]:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+            return dict(row) if row else None
+
+    def update_case(self, case_id: int, **kwargs):
+        allowed = {"name", "case_number", "description", "exhibit_format", "exhibit_prefix", "next_exhibit_num"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        with self._get_conn() as conn:
+            conn.execute(
+                f"UPDATE cases SET {set_clause} WHERE id = ?",
+                list(updates.values()) + [case_id]
+            )
+
+    def delete_case(self, case_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM evidence_tags WHERE case_id = ?", (case_id,))
+            conn.execute("DELETE FROM annotations WHERE case_id = ?", (case_id,))
+            conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
+
+    def get_next_exhibit_number(self, case_id: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT next_exhibit_num FROM cases WHERE id = ?", (case_id,)
+            ).fetchone()
+            if row:
+                num = row["next_exhibit_num"]
+                conn.execute(
+                    "UPDATE cases SET next_exhibit_num = ? WHERE id = ?",
+                    (num + 1, case_id)
+                )
+                return num
+            return 1
+
+    # ── Evidence tag operations ──
+
+    def tag_evidence(self, item_type: str, item_id: int, case_id: int,
+                     legal_issue: str = "", exhibit_label: str = "",
+                     flag: str = "none", collection: str = "") -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO evidence_tags (item_type, item_id, case_id,
+                   legal_issue, exhibit_label, flag, collection)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(item_type, item_id, case_id) DO UPDATE SET
+                   legal_issue = excluded.legal_issue,
+                   exhibit_label = excluded.exhibit_label,
+                   flag = excluded.flag,
+                   collection = excluded.collection""",
+                (item_type, item_id, case_id, legal_issue, exhibit_label, flag, collection)
+            )
+            return cur.lastrowid
+
+    def get_evidence_tag(self, item_type: str, item_id: int, case_id: int) -> Optional[dict]:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM evidence_tags WHERE item_type = ? AND item_id = ? AND case_id = ?",
+                (item_type, item_id, case_id)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_evidence_tags_for_case(self, case_id: int, legal_issue: Optional[str] = None,
+                                    flag: Optional[str] = None,
+                                    collection: Optional[str] = None) -> list[dict]:
+        conditions = ["case_id = ?"]
+        params = [case_id]
+        if legal_issue:
+            conditions.append("legal_issue = ?")
+            params.append(legal_issue)
+        if flag:
+            conditions.append("flag = ?")
+            params.append(flag)
+        if collection:
+            conditions.append("collection = ?")
+            params.append(collection)
+        where = " AND ".join(conditions)
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM evidence_tags WHERE {where} ORDER BY created_at",
+                params
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_collections(self, case_id: int) -> list[str]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT collection FROM evidence_tags
+                   WHERE case_id = ? AND collection != '' ORDER BY collection""",
+                (case_id,)
+            ).fetchall()
+            return [r["collection"] for r in rows]
+
+    def bulk_tag_evidence(self, items: list[tuple], case_id: int,
+                          legal_issue: str = "", flag: str = "none",
+                          collection: str = ""):
+        """Tag multiple items at once. items = [(item_type, item_id), ...]"""
+        for item_type, item_id in items:
+            self.tag_evidence(item_type, item_id, case_id,
+                              legal_issue=legal_issue, flag=flag, collection=collection)
+
+    def remove_evidence_tag(self, tag_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM evidence_tags WHERE id = ?", (tag_id,))
+
+    # ── Annotation operations ──
+
+    def add_annotation(self, item_type: str, item_id: int, note_text: str,
+                       case_id: Optional[int] = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO annotations (item_type, item_id, case_id, note_text) VALUES (?, ?, ?, ?)",
+                (item_type, item_id, case_id, note_text)
+            )
+            return cur.lastrowid
+
+    def get_annotations(self, item_type: str, item_id: int,
+                        case_id: Optional[int] = None) -> list[dict]:
+        with self._get_conn() as conn:
+            if case_id:
+                rows = conn.execute(
+                    """SELECT * FROM annotations
+                       WHERE item_type = ? AND item_id = ? AND case_id = ?
+                       ORDER BY created_at DESC""",
+                    (item_type, item_id, case_id)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM annotations WHERE item_type = ? AND item_id = ? ORDER BY created_at DESC",
+                    (item_type, item_id)
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_annotations_for_case(self, case_id: int) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM annotations WHERE case_id = ? ORDER BY created_at DESC",
+                (case_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_annotation(self, annotation_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM annotations WHERE id = ?", (annotation_id,))
+
+    def search_annotations(self, query: str, case_id: Optional[int] = None) -> list[dict]:
+        with self._get_conn() as conn:
+            if case_id:
+                rows = conn.execute(
+                    "SELECT * FROM annotations WHERE case_id = ? AND note_text LIKE ? ORDER BY created_at DESC",
+                    (case_id, f"%{query}%")
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM annotations WHERE note_text LIKE ? ORDER BY created_at DESC",
+                    (f"%{query}%",)
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ── App settings (PIN lock, preferences) ──
+
+    def set_setting(self, key: str, value: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value)
+            )
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+            return row["value"] if row else default
+
+    # ── Audit log ──
+
+    def log_action(self, action: str, details: str = ""):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO audit_log (action, details) VALUES (?, ?)",
+                (action, details)
+            )
+
+    def get_audit_log(self, limit: int = 100) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
