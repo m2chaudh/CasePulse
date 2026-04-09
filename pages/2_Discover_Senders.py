@@ -718,12 +718,18 @@ with ai_tab1:
         avg_conf = sum(s["confidence"] for s in suggestions.values()) / len(suggestions) if suggestions else 0
         st.caption(f"Approved: {approved_count} | Rejected: {rejected_count} | Avg confidence: {avg_conf:.0f}%")
 
+        # Initialize manual overrides storage
+        if "ai_manual_cats" not in st.session_state:
+            st.session_state["ai_manual_cats"] = {}
+
         # List suggestions
         for sid, sug in suggestions.items():
+            is_approved = st.session_state["ai_approved"].get(sid, True)
+
             col1, col2, col3, col4 = st.columns([0.5, 3, 3, 1])
             with col1:
                 approved = st.checkbox(
-                    "a", value=st.session_state["ai_approved"].get(sid, True),
+                    "a", value=is_approved,
                     key=f"ai_approve_{sid}", label_visibility="collapsed",
                 )
                 st.session_state["ai_approved"][sid] = approved
@@ -731,33 +737,67 @@ with ai_tab1:
                 name_str = f"**{sug['name']}** — " if sug["name"] else ""
                 st.markdown(f"{name_str}{sug['email']}")
             with col3:
-                cat_labels_str = ", ".join(category_labels.get(c, c) for c in sug["categories"])
-                st.markdown(cat_labels_str)
+                if approved:
+                    # Show AI suggestion
+                    cat_labels_str = ", ".join(category_labels.get(c, c) for c in sug["categories"])
+                    st.markdown(cat_labels_str)
+                else:
+                    # Show manual category picker when rejected
+                    manual = st.multiselect(
+                        "Assign manually",
+                        categories,
+                        default=st.session_state["ai_manual_cats"].get(sid, []),
+                        key=f"ai_manual_{sid}",
+                        format_func=lambda x: category_labels.get(x, x),
+                        placeholder="Pick categories...",
+                        label_visibility="collapsed",
+                    )
+                    st.session_state["ai_manual_cats"][sid] = manual
             with col4:
-                st.markdown(f"**{sug['confidence']}%**")
+                if approved:
+                    st.markdown(f"**{sug['confidence']}%**")
+                else:
+                    st.caption("manual")
 
         # Apply / discard
+        manual_count = sum(1 for sid in suggestions
+                          if not st.session_state["ai_approved"].get(sid)
+                          and st.session_state["ai_manual_cats"].get(sid))
+
         col1, col2 = st.columns(2)
         with col1:
-            if st.button(f"Apply {approved_count} Approved", type="primary", key="apply_ai_tags"):
+            total_apply = approved_count + manual_count
+            if st.button(f"Apply {total_apply} ({approved_count} AI + {manual_count} manual)",
+                         type="primary", key="apply_ai_tags"):
                 applied = 0
                 for sid, sug in suggestions.items():
                     if st.session_state["ai_approved"].get(sid):
+                        # Apply AI suggestion
                         existing = _DB.parse_categories(
                             next((s.get("category") for s in senders if s["id"] == sid), "")
                         )
                         merged = list(dict.fromkeys(existing + sug["categories"]))
                         db.set_sender_category(sid, merged)
                         applied += 1
-                db.log_action("ai_auto_tag", f"Applied AI tags to {applied} contacts")
+                    elif st.session_state["ai_manual_cats"].get(sid):
+                        # Apply manual override
+                        existing = _DB.parse_categories(
+                            next((s.get("category") for s in senders if s["id"] == sid), "")
+                        )
+                        merged = list(dict.fromkeys(existing + st.session_state["ai_manual_cats"][sid]))
+                        db.set_sender_category(sid, merged)
+                        applied += 1
+                db.log_action("ai_auto_tag", f"Applied tags to {applied} contacts ({approved_count} AI, {manual_count} manual)")
                 st.success(f"Applied tags to {applied} contacts!")
                 del st.session_state["ai_suggestions"]
                 st.session_state.pop("ai_approved", None)
+                st.session_state.pop("ai_manual_cats", None)
                 st.rerun()
         with col2:
             if st.button("Discard All Suggestions", key="discard_ai_tags"):
                 del st.session_state["ai_suggestions"]
                 st.session_state.pop("ai_approved", None)
+                st.session_state.pop("ai_manual_cats", None)
                 st.rerun()
 
 # ── Tab 2: AI Assistant — executes actions directly ──
