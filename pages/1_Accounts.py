@@ -12,7 +12,7 @@ from casepulse.config import get_data_dir
 st.set_page_config(page_title="CasePulse - Accounts", page_icon="CP", layout="wide")
 
 st.markdown("## Accounts")
-st.markdown("Connect your Outlook, Hotmail, and Gmail accounts.")
+st.markdown("Connect your Outlook, Hotmail, and Gmail accounts. You can add multiple accounts of each type.")
 
 
 from components.page_init import init_page
@@ -34,7 +34,6 @@ if accounts:
             if st.button("Remove", key=f"remove_{acc['id']}"):
                 db.delete_account(acc["id"])
                 config.remove_account(acc["provider"], acc["email"])
-                # Clean up token files
                 token_dir = get_data_dir() / "tokens"
                 safe = acc["email"].replace("@", "_at_").replace(".", "_")
                 for f in token_dir.glob(f"*{safe}*"):
@@ -42,31 +41,35 @@ if accounts:
                 st.rerun()
     st.divider()
 
-# ── Add Microsoft Account ──
-st.markdown("### Add Microsoft Account (Outlook / Hotmail)")
+ms_accounts = [a for a in accounts if a["provider"] == "microsoft"]
+google_accounts = [a for a in accounts if a["provider"] == "google"]
 
-with st.expander("Setup Guide — Microsoft App Registration", expanded=not any(
-    a["provider"] == "microsoft" for a in accounts
-)):
+# ── Add Microsoft Account ──
+st.markdown(f"### Add Microsoft Account (Outlook / Hotmail)")
+if ms_accounts:
+    st.caption(f"{len(ms_accounts)} Microsoft account(s) connected. You can add more below.")
+
+with st.expander("Setup Guide — Microsoft App Registration", expanded=not ms_accounts):
     from components.setup_guides import render_microsoft_guide
     render_microsoft_guide()
 
-ms_client_id = st.text_input(
-    "Microsoft Application (Client) ID",
-    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    key="ms_client_id",
-    help="From your Azure App Registration overview page",
-)
+# Use a form so inputs clear properly after submission
+with st.form("ms_form", clear_on_submit=True):
+    st.markdown("**Enter details for the account you want to add:**")
+    ms_client_id = st.text_input(
+        "Microsoft Application (Client) ID",
+        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        help="From your Azure App Registration overview page. You can reuse the same Client ID for multiple Outlook/Hotmail accounts.",
+    )
+    ms_email_hint = st.text_input(
+        "Email address (Outlook/Hotmail)",
+        placeholder="you@outlook.com or you@hotmail.com",
+        help="The specific email account to connect",
+    )
+    ms_submitted = st.form_submit_button("Connect Microsoft Account")
 
-ms_email_hint = st.text_input(
-    "Email address (Outlook/Hotmail)",
-    placeholder="you@outlook.com or you@hotmail.com",
-    key="ms_email",
-    help="The email address for this account",
-)
-
-if st.button("Connect Microsoft Account", disabled=not ms_client_id):
-    if not ms_client_id or len(ms_client_id) < 10:
+if ms_submitted and ms_client_id:
+    if len(ms_client_id) < 10:
         st.error("Please enter a valid Client ID from your Azure App Registration.")
     else:
         with st.status("Authenticating with Microsoft...", expanded=True) as status:
@@ -88,7 +91,6 @@ if st.button("Connect Microsoft Account", disabled=not ms_client_id):
                     email = result["account_email"] or ms_email_hint
                     display_name = result.get("display_name", "")
 
-                    # Save to database
                     db.add_account(
                         provider="microsoft",
                         email=email,
@@ -108,69 +110,65 @@ if st.button("Connect Microsoft Account", disabled=not ms_client_id):
 st.divider()
 
 # ── Add Google Account ──
-st.markdown("### Add Gmail Account")
+st.markdown(f"### Add Gmail Account")
+if google_accounts:
+    st.caption(f"{len(google_accounts)} Gmail account(s) connected. You can add more below.")
 
-with st.expander("Setup Guide — Google OAuth Credentials", expanded=not any(
-    a["provider"] == "google" for a in accounts
-)):
+with st.expander("Setup Guide — Google OAuth Credentials", expanded=not google_accounts):
     from components.setup_guides import render_google_guide
     render_google_guide()
 
-google_creds_file = st.file_uploader(
-    "Upload Google OAuth credentials JSON",
-    type=["json"],
-    key="google_creds",
-    help="Download this from Google Cloud Console > APIs & Services > Credentials",
-)
+with st.form("google_form", clear_on_submit=True):
+    st.markdown("**Enter details for the Gmail account you want to add:**")
+    google_creds_file = st.file_uploader(
+        "Upload Google OAuth credentials JSON",
+        type=["json"],
+        help="Download this from Google Cloud Console > APIs & Services > Credentials. You can reuse the same credentials JSON for multiple Gmail accounts.",
+    )
+    google_email_hint = st.text_input(
+        "Gmail address",
+        placeholder="you@gmail.com",
+        help="The specific Gmail account to connect",
+    )
+    google_submitted = st.form_submit_button("Connect Gmail Account")
 
-google_email_hint = st.text_input(
-    "Gmail address",
-    placeholder="you@gmail.com",
-    key="google_email",
-    help="The Gmail address for this account",
-)
+if google_submitted and google_creds_file is not None:
+    with st.status("Authenticating with Google...", expanded=True) as status:
+        try:
+            creds_dir = get_data_dir() / "tokens"
+            safe_email = google_email_hint.replace("@", "_at_").replace(".", "_") if google_email_hint else "default"
+            creds_path = creds_dir / f"google_creds_{safe_email}.json"
+            creds_content = google_creds_file.read()
+            creds_path.write_bytes(creds_content)
 
-if st.button("Connect Gmail Account", disabled=google_creds_file is None):
-    if google_creds_file is None:
-        st.error("Please upload your Google OAuth credentials JSON file.")
-    else:
-        with st.status("Authenticating with Google...", expanded=True) as status:
-            try:
-                # Save credentials file
-                creds_dir = get_data_dir() / "tokens"
-                safe_email = google_email_hint.replace("@", "_at_").replace(".", "_") if google_email_hint else "default"
-                creds_path = creds_dir / f"google_creds_{safe_email}.json"
-                creds_content = google_creds_file.read()
-                creds_path.write_bytes(creds_content)
+            from casepulse.auth.google_auth import GoogleAuth
+            auth = GoogleAuth(
+                credentials_file=str(creds_path),
+                account_email=google_email_hint,
+            )
 
-                from casepulse.auth.google_auth import GoogleAuth
-                auth = GoogleAuth(
-                    credentials_file=str(creds_path),
-                    account_email=google_email_hint,
+            st.write("Opening browser for Google sign-in...")
+            result = auth.authenticate_interactive(
+                callback=lambda msg: st.write(msg)
+            )
+
+            if "error" in result:
+                status.update(label="Authentication failed", state="error")
+                st.error(result["error"])
+            else:
+                email = result["account_email"] or google_email_hint
+                db.add_account(
+                    provider="google",
+                    email=email,
+                    display_name="",
+                    token_file=str(creds_path),
                 )
+                config.add_google_account(email, str(creds_path))
 
-                st.write("Opening browser for Google sign-in...")
-                result = auth.authenticate_interactive(
-                    callback=lambda msg: st.write(msg)
-                )
+                status.update(label=f"Connected: {email}", state="complete")
+                st.success(f"Successfully connected {email}!")
+                st.rerun()
 
-                if "error" in result:
-                    status.update(label="Authentication failed", state="error")
-                    st.error(result["error"])
-                else:
-                    email = result["account_email"] or google_email_hint
-                    db.add_account(
-                        provider="google",
-                        email=email,
-                        display_name="",
-                        token_file=str(creds_path),
-                    )
-                    config.add_google_account(email, str(creds_path))
-
-                    status.update(label=f"Connected: {email}", state="complete")
-                    st.success(f"Successfully connected {email}!")
-                    st.rerun()
-
-            except Exception as e:
-                status.update(label="Error", state="error")
-                st.error(f"Authentication error: {str(e)}")
+        except Exception as e:
+            status.update(label="Error", state="error")
+            st.error(f"Authentication error: {str(e)}")
