@@ -1,6 +1,8 @@
 """Discover Senders page — Scan mailboxes and select relevant contacts."""
 import streamlit as st
 import sys
+import json as _json
+import sqlite3
 from pathlib import Path
 from datetime import date
 
@@ -996,6 +998,35 @@ if total_pages > 1:
 st.markdown("---")
 
 # ── Contact list ──
+# Pre-fetch recent subjects for all contacts on this page in one query
+_page_emails = [s["email"] for s in page_items]
+_page_subjects = {}
+try:
+    _list_conn = sqlite3.connect(str(db.db_path))
+    _list_conn.row_factory = sqlite3.Row
+    for _pe in _page_emails:
+        if subject_match_senders is not None and _pe in subject_match_senders:
+            _search_term = f"%{subject_search}%"
+            _rows = _list_conn.execute(
+                """SELECT subject, date_received FROM emails
+                   WHERE sender_email = ? AND (subject LIKE ? OR body_text LIKE ?)
+                   ORDER BY date_received DESC LIMIT 3""",
+                (_pe, _search_term, _search_term)
+            ).fetchall()
+            _match_count = subject_match_senders.get(_pe, 0)
+            _page_subjects[_pe] = {"rows": _rows, "match_count": _match_count, "is_search": True}
+        else:
+            _rows = _list_conn.execute(
+                """SELECT subject, date_received FROM emails
+                   WHERE sender_email = ?
+                   ORDER BY date_received DESC LIMIT 3""",
+                (_pe,)
+            ).fetchall()
+            _page_subjects[_pe] = {"rows": _rows, "match_count": 0, "is_search": False}
+    _list_conn.close()
+except Exception:
+    pass
+
 for sender in page_items:
     email_addr = sender["email"]
     freq = email_counts.get(email_addr, 0)
@@ -1024,40 +1055,16 @@ for sender in page_items:
         else:
             st.markdown(f"**{email_addr}**{tags}")
 
-        # Show recent email subjects + dates under every contact
-        try:
-            conn = sqlite3.connect(str(db.db_path))
-            conn.row_factory = sqlite3.Row
-
-            if subject_match_senders is not None and email_addr in subject_match_senders:
-                # Subject search active — show matching emails
-                search_term = f"%{subject_search}%"
-                subj_rows = conn.execute(
-                    """SELECT subject, date_received FROM emails
-                       WHERE sender_email = ? AND (subject LIKE ? OR body_text LIKE ?)
-                       ORDER BY date_received DESC LIMIT 3""",
-                    (email_addr, search_term, search_term)
-                ).fetchall()
-                match_count = subject_match_senders.get(email_addr, 0)
-                extra = f" +{match_count - 3} more" if match_count > 3 else ""
-                if subj_rows:
-                    lines = [f"{r['date_received'][:10]} — {r['subject'][:55]}" for r in subj_rows]
-                    st.caption(f"Matching: " + " | ".join(lines) + extra)
+        # Show recent email subjects + dates (pre-fetched above)
+        subj_data = _page_subjects.get(email_addr)
+        if subj_data and subj_data["rows"]:
+            if subj_data["is_search"]:
+                extra = f" +{subj_data['match_count'] - 3} more" if subj_data["match_count"] > 3 else ""
+                lines = [f"{r['date_received'][:10]} — {r['subject'][:55]}" for r in subj_data["rows"]]
+                st.caption(f"Matching: " + " | ".join(lines) + extra)
             else:
-                # No subject search — show most recent emails from this sender
-                subj_rows = conn.execute(
-                    """SELECT subject, date_received FROM emails
-                       WHERE sender_email = ?
-                       ORDER BY date_received DESC LIMIT 3""",
-                    (email_addr,)
-                ).fetchall()
-                if subj_rows:
-                    lines = [f"{r['date_received'][:10]} — {r['subject'][:55]}" for r in subj_rows]
-                    st.caption(" | ".join(lines))
-
-            conn.close()
-        except Exception:
-            pass
+                lines = [f"{r['date_received'][:10]} — {r['subject'][:55]}" for r in subj_data["rows"]]
+                st.caption(" | ".join(lines))
 
     with col3:
         current_cats = _DB.parse_categories(sender.get("category"))
