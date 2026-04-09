@@ -59,27 +59,35 @@ Sign in with your Google account.
 - Select the new project from the dropdown
 
 **Step 3:** Enable Gmail API:
-- Go to **"APIs & Services"** > **"Library"** in the left menu
-- Search for **"Gmail API"**
-- Click on it and click **"Enable"**
+- In the left menu, go to **"APIs & Services"** > **"Library"**
+  (or search "Gmail API" in the top search bar)
+- Click **"Gmail API"** in the results
+- Click **"Enable"**
 
 **Step 4:** Configure OAuth consent screen:
-- Go to **"APIs & Services"** > **"OAuth consent screen"**
-- Select **"External"** (unless you have a Workspace account)
-- Click **"Create"**
-- Fill in App name: `CasePulse`, your email for support, and developer contact
-- Click **"Save and Continue"** through all steps
-- Under **"Test users"**, add your Gmail address
-- Click **"Save and Continue"**
+- In the left menu, go to **"APIs & Services"** > **"OAuth consent screen"**
+- You should see an **Overview** page — click **"Get Started"**
+- **App name:** `CasePulse`
+- **User support email:** Select your email from the dropdown
+- Click **"Next"**
+- **Scopes:** Click **"Add or Remove Scopes"**, search for `Gmail API`,
+  check **`https://www.googleapis.com/auth/gmail.readonly`**, click **"Update"**, then **"Next"**
+- **Audience / User type:** Select **"External"** and click **"Next"**
+  (If you don't see this step, it may default to External — that's fine)
+- **Contact information:** Enter your email address
+- Click **"Create"** or **"Save"**
+- After creation, go to the **"Audience"** section in the left menu (under OAuth consent screen)
+- Under **"Test users"**, click **"Add Users"**, enter your Gmail address, and save
 
 **Step 5:** Create OAuth credentials:
-- Go to **"APIs & Services"** > **"Credentials"**
-- Click **"Create Credentials"** > **"OAuth client ID"**
-- Application type: **"Desktop app"**
-- Name: `CasePulse`
+- In the left menu, go to **"APIs & Services"** > **"Credentials"**
+- Click **"Create Credentials"** at the top > **"OAuth client ID"**
+- **Application type:** Select **"Desktop app"**
+- **Name:** `CasePulse`
 - Click **"Create"**
 
-**Step 6:** Click **"Download JSON"** on the popup that appears.
+**Step 6:** On the popup that appears, click **"Download JSON"**.
+(If you missed it, find the credential in the list and click the download icon on the right)
 
 **Step 7:** Save the downloaded JSON file and upload it below.
 """
