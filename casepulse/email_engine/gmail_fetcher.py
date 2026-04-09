@@ -167,54 +167,87 @@ class GmailFetcher:
         errors = []
 
         try:
-            # Build Gmail search query
             start = date_start.replace("-", "/")
             end = date_end.replace("-", "/")
-            query_parts = [f"after:{start}", f"before:{end}"]
-
-            # Add sender/recipient filter
-            if sender_emails:
-                addr_queries = []
-                for addr in sender_emails:
-                    addr_queries.append(f"from:{addr}")
-                    addr_queries.append(f"to:{addr}")
-                query_parts.append(f"({' OR '.join(addr_queries)})")
+            date_query = f"after:{start} before:{end}"
 
             # Add keyword filter
+            kw_part = ""
             if keywords:
                 kw_query = " OR ".join(f'"{kw}"' for kw in keywords)
-                query_parts.append(f"({kw_query})")
+                kw_part = f" ({kw_query})"
 
-            query = " ".join(query_parts)
-
-            # First, list all matching message IDs
+            # List all matching message IDs
+            # Gmail has a query length limit — batch senders into groups of 10
             if progress_cb:
                 progress_cb("Listing matching emails...")
 
-            all_msg_ids = []
-            page_token = None
-            while True:
-                results = self.service.users().messages().list(
-                    userId="me",
-                    q=query,
-                    pageToken=page_token,
-                    maxResults=500,
-                ).execute()
+            all_msg_ids = set()  # Use set to deduplicate across batches
 
-                messages = results.get("messages", [])
-                if not messages:
-                    break
+            if sender_emails:
+                SENDER_BATCH = 10
+                for batch_start in range(0, len(sender_emails), SENDER_BATCH):
+                    batch = sender_emails[batch_start:batch_start + SENDER_BATCH]
+                    addr_queries = []
+                    for addr in batch:
+                        addr_queries.append(f"from:{addr}")
+                        addr_queries.append(f"to:{addr}")
+                    query = f"{date_query} ({' OR '.join(addr_queries)}){kw_part}"
 
-                all_msg_ids.extend([m["id"] for m in messages])
-                if progress_cb:
-                    progress_cb(f"Found {len(all_msg_ids)} matching emails...")
+                    page_token = None
+                    while True:
+                        results = self.service.users().messages().list(
+                            userId="me",
+                            q=query,
+                            pageToken=page_token,
+                            maxResults=500,
+                        ).execute()
 
-                page_token = results.get("nextPageToken")
-                if not page_token:
-                    break
+                        messages = results.get("messages", [])
+                        if not messages:
+                            break
 
+                        for m in messages:
+                            all_msg_ids.add(m["id"])
+
+                        page_token = results.get("nextPageToken")
+                        if not page_token:
+                            break
+
+                    if progress_cb:
+                        progress_cb(
+                            f"Scanning senders {batch_start + 1}-{min(batch_start + SENDER_BATCH, len(sender_emails))}"
+                            f"/{len(sender_emails)}... {len(all_msg_ids)} emails found so far"
+                        )
+            else:
+                # No sender filter — fetch all emails in date range
+                query = f"{date_query}{kw_part}"
+                page_token = None
+                while True:
+                    results = self.service.users().messages().list(
+                        userId="me",
+                        q=query,
+                        pageToken=page_token,
+                        maxResults=500,
+                    ).execute()
+
+                    messages = results.get("messages", [])
+                    if not messages:
+                        break
+
+                    for m in messages:
+                        all_msg_ids.add(m["id"])
+
+                    if progress_cb:
+                        progress_cb(f"Found {len(all_msg_ids)} emails...")
+
+                    page_token = results.get("nextPageToken")
+                    if not page_token:
+                        break
+
+            all_msg_ids = list(all_msg_ids)
             if progress_cb:
-                progress_cb(f"Total: {len(all_msg_ids)} emails to fetch. Downloading...")
+                progress_cb(f"Total: {len(all_msg_ids)} unique emails to fetch. Downloading...")
 
             # Process each message with per-message progress
             for i, msg_id in enumerate(all_msg_ids):
