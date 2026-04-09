@@ -162,10 +162,51 @@ with col4:
         key="cat_filter",
     )
 
+# Subject/content search — find senders by what they sent
+subject_search = st.text_input(
+    "Search by email subject or content",
+    placeholder="e.g., ticket, itinerary, booking, invoice, court order...",
+    key="subject_search",
+    help="Find senders who sent emails containing this text in the subject or body — useful for finding noreply senders like airlines, courts, banks",
+)
+
+# Build sender set matching subject/content search
+subject_match_senders = None
+if subject_search:
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(db.db_path))
+        conn.row_factory = sqlite3.Row
+        search_term = f"%{subject_search}%"
+        rows = conn.execute(
+            """SELECT DISTINCT sender_email, sender_name, COUNT(*) as cnt
+               FROM emails
+               WHERE subject LIKE ? OR body_text LIKE ?
+               GROUP BY sender_email
+               ORDER BY cnt DESC""",
+            (search_term, search_term)
+        ).fetchall()
+        subject_match_senders = {r["sender_email"]: r["cnt"] for r in rows}
+        conn.close()
+
+        if subject_match_senders:
+            st.success(
+                f"Found **{len(subject_match_senders)}** senders with emails matching \"{subject_search}\" "
+                f"({sum(subject_match_senders.values())} emails total)"
+            )
+        else:
+            st.warning(f"No emails found matching \"{subject_search}\". Try fetching emails first, then search.")
+    except Exception:
+        pass
+
 # Build and filter the list
 filtered = list(senders)
 
-# Text search
+# If subject search is active, only show matching senders
+if subject_match_senders is not None:
+    filtered = [s for s in filtered if s["email"] in subject_match_senders]
+
+# Text search (name/email)
 if search:
     search_lower = search.lower()
     filtered = [s for s in filtered if search_lower in s["email"].lower() or
@@ -303,6 +344,28 @@ for sender in page_items:
             st.markdown(f"**{name}**{auto_tag}  \n{email_addr}")
         else:
             st.markdown(f"**{email_addr}**{auto_tag}")
+
+        # Show matching subjects when subject search is active
+        if subject_match_senders is not None and email_addr in subject_match_senders:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(str(db.db_path))
+                conn.row_factory = sqlite3.Row
+                search_term = f"%{subject_search}%"
+                subj_rows = conn.execute(
+                    """SELECT subject, date_received FROM emails
+                       WHERE sender_email = ? AND (subject LIKE ? OR body_text LIKE ?)
+                       ORDER BY date_received DESC LIMIT 3""",
+                    (email_addr, search_term, search_term)
+                ).fetchall()
+                conn.close()
+                if subj_rows:
+                    previews = [f"*{r['subject'][:60]}* ({r['date_received'][:10]})" for r in subj_rows]
+                    match_count = subject_match_senders[email_addr]
+                    extra = f" +{match_count - 3} more" if match_count > 3 else ""
+                    st.caption(f"Matching: {' | '.join(previews)}{extra}")
+            except Exception:
+                pass
 
     with col3:
         cat = st.selectbox(
