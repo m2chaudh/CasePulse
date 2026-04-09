@@ -47,10 +47,12 @@ class OpenAIProvider(LLMProvider):
     """OpenAI or any OpenAI-compatible API provider."""
 
     def __init__(self, api_key: str, model: str = "gpt-4o",
-                 base_url: Optional[str] = None):
+                 base_url: Optional[str] = None,
+                 display_name: str = "OpenAI"):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
+        self.display_name = display_name
 
     def query(self, system_prompt: str, user_prompt: str,
               context_chunks: list[str] = None) -> str:
@@ -85,15 +87,59 @@ class OpenAIProvider(LLMProvider):
         return bool(self.api_key)
 
     def get_name(self) -> str:
-        name = "OpenAI" if not self.base_url else "Custom API"
-        return f"{name} ({self.model})"
+        return f"{self.display_name} ({self.model})"
+
+
+class GeminiProvider(LLMProvider):
+    """Google Gemini API provider."""
+
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
+        self.api_key = api_key
+        self.model = model
+
+    def query(self, system_prompt: str, user_prompt: str,
+              context_chunks: list[str] = None) -> str:
+        import google.generativeai as genai
+
+        genai.configure(api_key=self.api_key)
+        model = genai.GenerativeModel(
+            self.model,
+            system_instruction=system_prompt,
+        )
+
+        content = user_prompt
+        if context_chunks:
+            context_text = "\n\n---\n\n".join(context_chunks)
+            content = (
+                f"Here is the relevant email context:\n\n{context_text}\n\n"
+                f"---\n\nQuestion: {user_prompt}"
+            )
+
+        response = model.generate_content(content)
+        return response.text
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def get_name(self) -> str:
+        return f"Gemini ({self.model})"
+
+
+# All supported providers and their default models
+PROVIDERS = {
+    "ollama": {"label": "Ollama (Local)", "default_model": "llama3.1:8b", "needs_key": False},
+    "gemini": {"label": "Google Gemini", "default_model": "gemini-2.5-flash", "needs_key": True},
+    "claude": {"label": "Anthropic Claude", "default_model": "claude-sonnet-4-6", "needs_key": True},
+    "openai": {"label": "OpenAI", "default_model": "gpt-4o", "needs_key": True},
+    "custom": {"label": "Custom (OpenAI-compatible)", "default_model": "", "needs_key": True},
+}
 
 
 def create_provider(provider_type: str, **kwargs) -> LLMProvider:
     """Factory function to create the right LLM provider.
 
     Args:
-        provider_type: One of 'ollama', 'claude', 'openai', 'custom'
+        provider_type: One of 'ollama', 'gemini', 'claude', 'openai', 'custom'
         **kwargs: Provider-specific arguments (api_key, model, base_url)
     """
     if provider_type == "ollama":
@@ -101,16 +147,27 @@ def create_provider(provider_type: str, **kwargs) -> LLMProvider:
             model=kwargs.get("model", "llama3.1:8b"),
             base_url=kwargs.get("base_url", "http://localhost:11434"),
         )
+    elif provider_type == "gemini":
+        return GeminiProvider(
+            api_key=kwargs.get("api_key", ""),
+            model=kwargs.get("model", "gemini-2.5-flash"),
+        )
     elif provider_type == "claude":
         return ClaudeProvider(
             api_key=kwargs.get("api_key", ""),
             model=kwargs.get("model", "claude-sonnet-4-6"),
         )
-    elif provider_type in ("openai", "custom"):
+    elif provider_type == "openai":
         return OpenAIProvider(
             api_key=kwargs.get("api_key", ""),
             model=kwargs.get("model", "gpt-4o"),
+        )
+    elif provider_type == "custom":
+        return OpenAIProvider(
+            api_key=kwargs.get("api_key", ""),
+            model=kwargs.get("model", ""),
             base_url=kwargs.get("base_url"),
+            display_name="Custom API",
         )
     else:
         raise ValueError(f"Unknown provider: {provider_type}")

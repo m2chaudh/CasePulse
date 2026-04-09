@@ -156,13 +156,22 @@ def main():
         st.markdown(f"Current range: **{config.date_start}** to **{config.date_end}**")
 
         st.markdown("#### LLM Provider")
+        from casepulse.llm.api_provider import PROVIDERS
+        provider_keys = list(PROVIDERS.keys())
+        provider_labels = [PROVIDERS[k]["label"] for k in provider_keys]
+        current_idx = provider_keys.index(config.llm_provider) if config.llm_provider in provider_keys else 0
         provider = st.selectbox(
             "AI Provider",
-            ["ollama", "claude", "openai", "custom"],
-            index=["ollama", "claude", "openai", "custom"].index(config.llm_provider),
+            provider_keys,
+            index=current_idx,
+            format_func=lambda x: PROVIDERS[x]["label"],
         )
         if provider != config.llm_provider:
             config.set("llm.provider", provider)
+            # Set default model for the new provider
+            default_model = PROVIDERS[provider]["default_model"]
+            if default_model:
+                config.set("llm.model", default_model)
 
         if provider == "ollama":
             st.info("Ollama runs locally — your data never leaves this machine.")
