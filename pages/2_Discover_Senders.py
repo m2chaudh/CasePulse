@@ -416,6 +416,25 @@ with col5:
                     db.set_sender_selected(s["id"], False)
             st.rerun()
 
+# ── Bulk category assignment ──
+if show_filter == "Selected" or len(filtered) <= 100:
+    st.markdown("**Bulk assign category to all visible contacts:**")
+    bcol1, bcol2 = st.columns([2, 1])
+    with bcol1:
+        bulk_cat = st.selectbox(
+            "Category for all visible",
+            categories,
+            format_func=lambda x: category_labels.get(x, x),
+            key="bulk_cat_assign",
+            label_visibility="collapsed",
+        )
+    with bcol2:
+        if st.button(f"Apply to {len(filtered)} visible", key="apply_bulk_cat"):
+            for s in filtered:
+                db.set_sender_category(s["id"], bulk_cat)
+            st.success(f"Set {len(filtered)} contacts to {category_labels.get(bulk_cat, bulk_cat)}")
+            st.rerun()
+
 # ── Pagination ──
 ITEMS_PER_PAGE = 50
 
