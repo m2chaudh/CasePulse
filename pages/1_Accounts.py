@@ -18,6 +18,12 @@ st.markdown("Connect your Outlook, Hotmail, and Gmail accounts. You can add mult
 from components.page_init import init_page
 db, config = init_page()
 
+# Track how many accounts have been added (used to reset input keys)
+if "ms_add_counter" not in st.session_state:
+    st.session_state.ms_add_counter = 0
+if "google_add_counter" not in st.session_state:
+    st.session_state.google_add_counter = 0
+
 # ── Show connected accounts ──
 accounts = db.get_accounts()
 if accounts:
@@ -45,7 +51,7 @@ ms_accounts = [a for a in accounts if a["provider"] == "microsoft"]
 google_accounts = [a for a in accounts if a["provider"] == "google"]
 
 # ── Add Microsoft Account ──
-st.markdown(f"### Add Microsoft Account (Outlook / Hotmail)")
+st.markdown("### Add Microsoft Account (Outlook / Hotmail)")
 if ms_accounts:
     st.caption(f"{len(ms_accounts)} Microsoft account(s) connected. You can add more below.")
 
@@ -53,22 +59,22 @@ with st.expander("Setup Guide — Microsoft App Registration", expanded=not ms_a
     from components.setup_guides import render_microsoft_guide
     render_microsoft_guide()
 
-# Use a form so inputs clear properly after submission
-with st.form("ms_form", clear_on_submit=True):
-    st.markdown("**Enter details for the account you want to add:**")
-    ms_client_id = st.text_input(
-        "Microsoft Application (Client) ID",
-        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-        help="From your Azure App Registration overview page. You can reuse the same Client ID for multiple Outlook/Hotmail accounts.",
-    )
-    ms_email_hint = st.text_input(
-        "Email address (Outlook/Hotmail)",
-        placeholder="you@outlook.com or you@hotmail.com",
-        help="The specific email account to connect",
-    )
-    ms_submitted = st.form_submit_button("Connect Microsoft Account")
+# Use counter in keys so fields reset after each successful add
+ms_key = st.session_state.ms_add_counter
+ms_client_id = st.text_input(
+    "Microsoft Application (Client) ID",
+    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    key=f"ms_client_id_{ms_key}",
+    help="From your Azure App Registration overview page. You can reuse the same Client ID for multiple Outlook/Hotmail accounts.",
+)
+ms_email_hint = st.text_input(
+    "Email address (Outlook/Hotmail)",
+    placeholder="you@outlook.com or you@hotmail.com",
+    key=f"ms_email_{ms_key}",
+    help="The specific email account to connect",
+)
 
-if ms_submitted and ms_client_id:
+if st.button("Connect Microsoft Account", disabled=not ms_client_id, key=f"ms_connect_{ms_key}"):
     if len(ms_client_id) < 10:
         st.error("Please enter a valid Client ID from your Azure App Registration.")
     else:
@@ -101,6 +107,8 @@ if ms_submitted and ms_client_id:
 
                     status.update(label=f"Connected: {email}", state="complete")
                     st.success(f"Successfully connected {email}!")
+                    # Increment counter to reset input fields on rerun
+                    st.session_state.ms_add_counter += 1
                     st.rerun()
 
             except Exception as e:
@@ -110,7 +118,7 @@ if ms_submitted and ms_client_id:
 st.divider()
 
 # ── Add Google Account ──
-st.markdown(f"### Add Gmail Account")
+st.markdown("### Add Gmail Account")
 if google_accounts:
     st.caption(f"{len(google_accounts)} Gmail account(s) connected. You can add more below.")
 
@@ -118,21 +126,21 @@ with st.expander("Setup Guide — Google OAuth Credentials", expanded=not google
     from components.setup_guides import render_google_guide
     render_google_guide()
 
-with st.form("google_form", clear_on_submit=True):
-    st.markdown("**Enter details for the Gmail account you want to add:**")
-    google_creds_file = st.file_uploader(
-        "Upload Google OAuth credentials JSON",
-        type=["json"],
-        help="Download this from Google Cloud Console > APIs & Services > Credentials. You can reuse the same credentials JSON for multiple Gmail accounts.",
-    )
-    google_email_hint = st.text_input(
-        "Gmail address",
-        placeholder="you@gmail.com",
-        help="The specific Gmail account to connect",
-    )
-    google_submitted = st.form_submit_button("Connect Gmail Account")
+google_key = st.session_state.google_add_counter
+google_creds_file = st.file_uploader(
+    "Upload Google OAuth credentials JSON",
+    type=["json"],
+    key=f"google_creds_{google_key}",
+    help="Download this from Google Cloud Console > APIs & Services > Credentials. You can reuse the same credentials JSON for multiple Gmail accounts.",
+)
+google_email_hint = st.text_input(
+    "Gmail address",
+    placeholder="you@gmail.com",
+    key=f"google_email_{google_key}",
+    help="The specific Gmail account to connect",
+)
 
-if google_submitted and google_creds_file is not None:
+if st.button("Connect Gmail Account", disabled=google_creds_file is None, key=f"google_connect_{google_key}"):
     with st.status("Authenticating with Google...", expanded=True) as status:
         try:
             creds_dir = get_data_dir() / "tokens"
@@ -167,6 +175,7 @@ if google_submitted and google_creds_file is not None:
 
                 status.update(label=f"Connected: {email}", state="complete")
                 st.success(f"Successfully connected {email}!")
+                st.session_state.google_add_counter += 1
                 st.rerun()
 
         except Exception as e:
