@@ -225,11 +225,12 @@ st.markdown("Link chat senders (names/phone numbers) to email contacts or case c
 
 sender_maps = db.get_chat_sender_maps()
 categories = [
-    "benefits", "cas_worker", "court", "daycare", "disclosure",
-    "docusign", "employer", "ex_spouse", "expenses", "family",
-    "financial", "insurance", "me", "mediator", "moving",
-    "my_lawyer", "opposing_lawyer", "police", "school",
-    "therapist", "travel", "witness", "other",
+    "benefits", "cas_worker", "court", "criminal_lawyer", "daycare",
+    "disclosure", "docusign", "employer", "evidence", "ex_spouse",
+    "expenses", "family", "family_lawyer", "financial", "insurance",
+    "me", "mediation", "mediator", "moving", "my_lawyer",
+    "opposing_lawyer", "police", "school", "therapist", "travel",
+    "witness", "other",
 ]
 
 if sender_maps:
