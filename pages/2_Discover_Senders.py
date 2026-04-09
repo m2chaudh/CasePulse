@@ -118,30 +118,28 @@ if not senders:
     st.stop()
 
 # Category options for legal case
-categories = [
-    "other", "my_lawyer", "opposing_lawyer", "ex_spouse",
-    "police", "cas_worker", "therapist", "court", "mediator",
-    "financial", "family", "witness", "school", "employer",
-    "daycare", "travel",
-]
 category_labels = {
-    "other": "Other",
+    "benefits": "Benefits",
+    "cas_worker": "CAS Worker",
+    "court": "Court",
+    "daycare": "Daycare",
+    "employer": "Employer",
+    "ex_spouse": "Ex-Spouse",
+    "family": "Family",
+    "financial": "Financial",
+    "insurance": "Insurance",
+    "mediator": "Mediator",
+    "moving": "Moving",
     "my_lawyer": "My Lawyer",
     "opposing_lawyer": "Opposing Lawyer",
-    "ex_spouse": "Ex-Spouse",
     "police": "Police",
-    "cas_worker": "CAS Worker",
-    "therapist": "Therapist",
-    "court": "Court",
-    "mediator": "Mediator",
-    "financial": "Financial",
-    "family": "Family",
-    "witness": "Witness",
     "school": "School",
-    "employer": "Employer",
-    "daycare": "Daycare",
+    "therapist": "Therapist",
     "travel": "Travel",
+    "witness": "Witness",
+    "other": "Other",
 }
+categories = list(category_labels.keys())
 
 # Auto-detect known patterns for smart sorting
 NOREPLY_PATTERNS = [
