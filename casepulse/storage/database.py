@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS senders (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS sender_accounts (
+    sender_email TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
+    UNIQUE(sender_email, account_id)
+);
+
 CREATE TABLE IF NOT EXISTS emails (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id TEXT,
@@ -270,7 +276,7 @@ class Database:
     # ── Sender operations ──
 
     def upsert_sender(self, email: str, display_name: str = "",
-                      category: str = "other") -> int:
+                      category: str = "other", account_id: Optional[int] = None) -> int:
         with self._get_conn() as conn:
             existing = conn.execute(
                 "SELECT id FROM senders WHERE email = ?", (email,)
@@ -281,12 +287,31 @@ class Database:
                         "UPDATE senders SET display_name = ? WHERE email = ?",
                         (display_name, email)
                     )
-                return existing["id"]
-            cur = conn.execute(
-                "INSERT INTO senders (email, display_name, category) VALUES (?, ?, ?)",
-                (email, display_name, category)
-            )
-            return cur.lastrowid
+                sender_id = existing["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO senders (email, display_name, category) VALUES (?, ?, ?)",
+                    (email, display_name, category)
+                )
+                sender_id = cur.lastrowid
+
+            # Link sender to the account it was discovered from
+            if account_id is not None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO sender_accounts (sender_email, account_id) VALUES (?, ?)",
+                    (email.lower(), account_id)
+                )
+
+            return sender_id
+
+    def get_senders_for_account(self, account_id: int) -> set:
+        """Get all sender emails linked to a specific account."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT sender_email FROM sender_accounts WHERE account_id = ?",
+                (account_id,)
+            ).fetchall()
+            return {r["sender_email"] for r in rows}
 
     def get_senders(self, selected_only: bool = False) -> list[dict]:
         with self._get_conn() as conn:

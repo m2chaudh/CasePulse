@@ -116,7 +116,7 @@ if scan_clicked:
 
             # Save to DB immediately (thread-safe — SQLite WAL mode)
             for c in contacts:
-                db.upsert_sender(c["email"], c.get("name", ""))
+                db.upsert_sender(c["email"], c.get("name", ""), account_id=acc_info["id"])
 
             scan_results[acc_email] = contacts
             scan_progress[acc_email] = f"Done — {len(contacts)} contacts found"
@@ -284,43 +284,15 @@ try:
     conn = sqlite3.connect(str(db.db_path))
     conn.row_factory = sqlite3.Row
 
-    # Email frequency per sender (optionally filtered by account)
+    # Email frequency per sender
+    rows = conn.execute(
+        "SELECT sender_email, COUNT(*) as cnt FROM emails GROUP BY sender_email"
+    ).fetchall()
+
+    # Build sender-to-account mapping from scan data
     if selected_account_id:
-        rows = conn.execute(
-            "SELECT sender_email, COUNT(*) as cnt FROM emails WHERE account_id = ? GROUP BY sender_email",
-            (selected_account_id,)
-        ).fetchall()
-        # Also build the set of senders that appear in this account
-        senders_in_account = set()
-        all_in_account = conn.execute(
-            """SELECT DISTINCT sender_email FROM emails WHERE account_id = ?
-               UNION
-               SELECT DISTINCT sender_email FROM emails WHERE account_id = ? AND direction = 'sent'""",
-            (selected_account_id, selected_account_id)
-        ).fetchall()
-        for r in all_in_account:
-            senders_in_account.add(r["sender_email"].lower())
-        # Also include recipients from sent emails in this account
-        recip_rows_acct = conn.execute(
-            "SELECT recipients FROM emails WHERE account_id = ?",
-            (selected_account_id,)
-        ).fetchall()
-        import json as _json
-        for r in recip_rows_acct:
-            recips = r["recipients"]
-            if recips:
-                try:
-                    rlist = _json.loads(recips) if isinstance(recips, str) else recips
-                    for addr in rlist:
-                        email_addr = addr if isinstance(addr, str) else addr.get("email", addr.get("address", ""))
-                        if email_addr:
-                            senders_in_account.add(email_addr.lower())
-                except Exception:
-                    pass
-    else:
-        rows = conn.execute(
-            "SELECT sender_email, COUNT(*) as cnt FROM emails GROUP BY sender_email"
-        ).fetchall()
+        senders_in_account = db.get_senders_for_account(selected_account_id)
+    import json as _json
 
     for r in rows:
         email_counts[r["sender_email"]] = r["cnt"]
