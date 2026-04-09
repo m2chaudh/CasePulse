@@ -147,14 +147,64 @@ def is_noreply(email: str) -> bool:
 st.markdown("### Select Relevant Contacts")
 st.markdown("Check the contacts relevant to your case. Sorted by email frequency — your key contacts are at the top.")
 
+# ── Build email frequency + domain data upfront ──
+email_counts = {}
+domain_counts = {}
+two_way_senders = set()  # contacts you both sent to AND received from
+try:
+    import sqlite3
+    conn = sqlite3.connect(str(db.db_path))
+    conn.row_factory = sqlite3.Row
+
+    # Email frequency per sender
+    rows = conn.execute(
+        "SELECT sender_email, COUNT(*) as cnt FROM emails GROUP BY sender_email"
+    ).fetchall()
+    for r in rows:
+        email_counts[r["sender_email"]] = r["cnt"]
+
+    # Two-way detection: senders who also appear in recipients
+    sent_to = set()
+    recip_rows = conn.execute("SELECT DISTINCT recipients FROM emails WHERE direction = 'sent'").fetchall()
+    for r in recip_rows:
+        recips = r["recipients"]
+        if recips:
+            import json as _json
+            try:
+                rlist = _json.loads(recips) if isinstance(recips, str) else recips
+                for addr in rlist:
+                    email_addr = addr if isinstance(addr, str) else addr.get("email", addr.get("address", ""))
+                    if email_addr:
+                        sent_to.add(email_addr.lower())
+            except Exception:
+                pass
+    received_from = set(e.lower() for e in email_counts.keys())
+    two_way_senders = sent_to & received_from
+
+    conn.close()
+except Exception:
+    pass
+
+# Build domain data from senders
+for s in senders:
+    parts = s["email"].split("@")
+    if len(parts) == 2:
+        domain = parts[1].lower()
+        domain_counts[domain] = domain_counts.get(domain, 0) + 1
+
 # ── Filter controls ──
+st.markdown("### Filter & Find")
+
 col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 with col1:
-    search = st.text_input("Search contacts", placeholder="Filter by name or email...", key="sender_search")
+    search = st.text_input("Search by name or email", placeholder="e.g., manisha, lawyer, police...", key="sender_search")
 with col2:
-    show_filter = st.selectbox("Show", ["All", "Selected", "Unselected", "People only"], key="show_filter")
+    show_filter = st.selectbox("Show", [
+        "All", "Selected", "Unselected", "People only",
+        "Two-way only", "Top 50", "Top 100", "Top 200",
+    ], key="show_filter")
 with col3:
-    sort_by = st.selectbox("Sort by", ["Frequency", "Name", "Email", "Category"], key="sort_by")
+    sort_by = st.selectbox("Sort by", ["Frequency", "Name", "Email", "Domain", "Category"], key="sort_by")
 with col4:
     cat_filter = st.selectbox(
         "Category",
@@ -162,19 +212,25 @@ with col4:
         key="cat_filter",
     )
 
-# Subject/content search — find senders by what they sent
-subject_search = st.text_input(
-    "Search by email subject or content",
-    placeholder="e.g., ticket, itinerary, booking, invoice, court order...",
-    key="subject_search",
-    help="Find senders who sent emails containing this text in the subject or body — useful for finding noreply senders like airlines, courts, banks",
-)
+# Domain filter
+top_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[:30]
+domain_options = ["All domains"] + [f"{d} ({c})" for d, c in top_domains]
+col1, col2 = st.columns([1, 1])
+with col1:
+    domain_filter = st.selectbox("Filter by domain", domain_options, key="domain_filter",
+                                  help="Select all contacts from a specific email domain (e.g., a law firm)")
+with col2:
+    subject_search = st.text_input(
+        "Search by email subject/content",
+        placeholder="e.g., ticket, itinerary, court order...",
+        key="subject_search",
+        help="Find senders by what they sent you",
+    )
 
-# Build sender set matching subject/content search
+# ── Build sender set matching subject/content search ──
 subject_match_senders = None
 if subject_search:
     try:
-        import sqlite3
         conn = sqlite3.connect(str(db.db_path))
         conn.row_factory = sqlite3.Row
         search_term = f"%{subject_search}%"
@@ -199,10 +255,10 @@ if subject_search:
     except Exception:
         pass
 
-# Build and filter the list
+# ── Build and filter the list ──
 filtered = list(senders)
 
-# If subject search is active, only show matching senders
+# Subject search
 if subject_match_senders is not None:
     filtered = [s for s in filtered if s["email"] in subject_match_senders]
 
@@ -212,6 +268,11 @@ if search:
     filtered = [s for s in filtered if search_lower in s["email"].lower() or
                 search_lower in (s.get("display_name") or "").lower()]
 
+# Domain filter
+if domain_filter != "All domains":
+    selected_domain = domain_filter.split(" (")[0]
+    filtered = [s for s in filtered if s["email"].lower().endswith(f"@{selected_domain}")]
+
 # Show filter
 if show_filter == "Selected":
     filtered = [s for s in filtered if s["selected"]]
@@ -219,6 +280,12 @@ elif show_filter == "Unselected":
     filtered = [s for s in filtered if not s["selected"]]
 elif show_filter == "People only":
     filtered = [s for s in filtered if not is_noreply(s["email"])]
+elif show_filter == "Two-way only":
+    filtered = [s for s in filtered if s["email"].lower() in two_way_senders]
+elif show_filter.startswith("Top "):
+    top_n = int(show_filter.split(" ")[1])
+    filtered.sort(key=lambda s: email_counts.get(s["email"], 0), reverse=True)
+    filtered = filtered[:top_n]
 
 # Category filter
 if cat_filter != "All categories":
@@ -227,28 +294,14 @@ if cat_filter != "All categories":
         filtered = [s for s in filtered if s.get("category") == cat_code[0]]
 
 # Sort
-# We need email counts from the database for frequency sort
-email_counts = {}
-try:
-    import sqlite3
-    conn = sqlite3.connect(str(db.db_path))
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """SELECT sender_email, COUNT(*) as cnt FROM emails
-           GROUP BY sender_email"""
-    ).fetchall()
-    for r in rows:
-        email_counts[r["sender_email"]] = r["cnt"]
-    conn.close()
-except Exception:
-    pass
-
 if sort_by == "Frequency":
     filtered.sort(key=lambda s: email_counts.get(s["email"], 0), reverse=True)
 elif sort_by == "Name":
     filtered.sort(key=lambda s: (s.get("display_name") or s["email"]).lower())
 elif sort_by == "Email":
     filtered.sort(key=lambda s: s["email"].lower())
+elif sort_by == "Domain":
+    filtered.sort(key=lambda s: (s["email"].split("@")[-1], s["email"]))
 elif sort_by == "Category":
     filtered.sort(key=lambda s: (s.get("category") or "zzz", s["email"].lower()))
 
@@ -256,19 +309,22 @@ elif sort_by == "Category":
 selected_count = sum(1 for s in senders if s["selected"])
 total_count = len(senders)
 noreply_count = sum(1 for s in senders if is_noreply(s["email"]))
+two_way_count = sum(1 for s in senders if s["email"].lower() in two_way_senders)
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
-    st.metric("Total Contacts", total_count)
+    st.metric("Total Contacts", f"{total_count:,}")
 with col2:
     st.metric("Selected", selected_count)
 with col3:
-    st.metric("Showing", len(filtered))
+    st.metric("Showing", f"{len(filtered):,}")
 with col4:
-    st.metric("Auto-Ignored", noreply_count, help="noreply, newsletters, notifications")
+    st.metric("Two-Way", two_way_count, help="Contacts you both sent to and received from — real conversations")
+with col5:
+    st.metric("Auto/Noreply", noreply_count)
 
 # ── Bulk actions ──
-col1, col2, col3 = st.columns([1, 1, 2])
+col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 with col1:
     if st.button("Select All Visible"):
         for s in filtered:
@@ -278,6 +334,12 @@ with col2:
     if st.button("Deselect All Visible"):
         for s in filtered:
             db.set_sender_selected(s["id"], False)
+        st.rerun()
+with col3:
+    if st.button("Select All Two-Way", help="Select all contacts with two-way communication"):
+        for s in senders:
+            if s["email"].lower() in two_way_senders:
+                db.set_sender_selected(s["id"], True)
         st.rerun()
 
 # ── Pagination ──
@@ -298,7 +360,7 @@ page_items = filtered[page_start:page_end]
 
 # Page navigation
 if total_pages > 1:
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 2, 1, 1])
     with col1:
         if st.button("First", disabled=st.session_state.sender_page == 0):
             st.session_state.sender_page = 0
@@ -308,12 +370,19 @@ if total_pages > 1:
             st.session_state.sender_page -= 1
             st.rerun()
     with col3:
-        st.markdown(f"**Page {st.session_state.sender_page + 1} of {total_pages}** ({page_start + 1}–{page_end} of {len(filtered)})")
+        jump = st.number_input("Page", min_value=1, max_value=total_pages,
+                                value=st.session_state.sender_page + 1,
+                                key="page_jump", label_visibility="collapsed")
+        if jump - 1 != st.session_state.sender_page:
+            st.session_state.sender_page = jump - 1
+            st.rerun()
     with col4:
+        st.markdown(f"**Page {st.session_state.sender_page + 1} of {total_pages}** ({page_start + 1}–{page_end} of {len(filtered):,})")
+    with col5:
         if st.button("Next", disabled=st.session_state.sender_page >= total_pages - 1):
             st.session_state.sender_page += 1
             st.rerun()
-    with col5:
+    with col6:
         if st.button("Last", disabled=st.session_state.sender_page >= total_pages - 1):
             st.session_state.sender_page = total_pages - 1
             st.rerun()
@@ -339,11 +408,15 @@ for sender in page_items:
 
     with col2:
         name = sender.get("display_name") or ""
-        auto_tag = " *(auto/noreply)*" if is_auto else ""
+        tags = ""
+        if is_auto:
+            tags += " *(auto)*"
+        if email_addr.lower() in two_way_senders:
+            tags += " **[two-way]**"
         if name:
-            st.markdown(f"**{name}**{auto_tag}  \n{email_addr}")
+            st.markdown(f"**{name}**{tags}  \n{email_addr}")
         else:
-            st.markdown(f"**{email_addr}**{auto_tag}")
+            st.markdown(f"**{email_addr}**{tags}")
 
         # Show matching subjects when subject search is active
         if subject_match_senders is not None and email_addr in subject_match_senders:
