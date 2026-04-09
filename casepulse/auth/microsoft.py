@@ -51,7 +51,7 @@ class MicrosoftAuth:
             self._cache_path().write_text(self._cache.serialize())
 
     def _find_matching_account(self):
-        """Find the MSAL cached account matching self.account_email."""
+        """Find the MSAL cached account matching self.account_email exactly."""
         accounts = self._app.get_accounts()
         if not accounts:
             return None
@@ -60,9 +60,7 @@ class MicrosoftAuth:
                 username = acc.get("username", "").lower()
                 if username == self.account_email.lower():
                     return acc
-        # Only return first account if we have exactly one (no ambiguity)
-        if len(accounts) == 1:
-            return accounts[0]
+        # No match — do NOT fall back to accounts[0]
         return None
 
     def get_token_silent(self) -> Optional[str]:
