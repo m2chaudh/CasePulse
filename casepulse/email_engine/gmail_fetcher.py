@@ -29,6 +29,7 @@ class GmailFetcher:
         """Scan all unique senders/recipients in date range.
 
         Date format: YYYY-MM-DD
+        Uses Gmail batch API for speed (up to 100 messages per batch request).
         """
         # Convert dates to Gmail search format (YYYY/MM/DD)
         start = date_start.replace("-", "/")
@@ -38,7 +39,13 @@ class GmailFetcher:
         contacts = {}
         page_token = None
         total_scanned = 0
+        total_listed = 0
 
+        # First, collect all message IDs
+        if progress_cb:
+            progress_cb("Listing emails in date range...")
+
+        all_msg_ids = []
         while True:
             results = self.service.users().messages().list(
                 userId="me",
@@ -51,16 +58,65 @@ class GmailFetcher:
             if not messages:
                 break
 
-            # Fetch headers for each message (batch-friendly)
-            for msg_stub in messages:
-                try:
-                    msg = self.service.users().messages().get(
-                        userId="me",
-                        id=msg_stub["id"],
-                        format="metadata",
-                        metadataHeaders=["From", "To", "Cc"],
-                    ).execute()
+            all_msg_ids.extend([m["id"] for m in messages])
+            total_listed += len(messages)
 
+            if progress_cb:
+                progress_cb(f"Found {total_listed} emails so far...")
+
+            page_token = results.get("nextPageToken")
+            if not page_token:
+                break
+
+        if progress_cb:
+            progress_cb(f"Total: {len(all_msg_ids)} emails to scan. Fetching headers...")
+
+        # Fetch headers in batches using Gmail batch API
+        BATCH_SIZE = 50
+
+        for batch_start in range(0, len(all_msg_ids), BATCH_SIZE):
+            batch_ids = all_msg_ids[batch_start:batch_start + BATCH_SIZE]
+            batch_results = []
+
+            def _make_callback(results_list):
+                def callback(request_id, response, exception):
+                    if exception is None:
+                        results_list.append(response)
+                return callback
+
+            try:
+                from googleapiclient.http import BatchHttpRequest
+                batch_req = self.service.new_batch_http_request(callback=_make_callback(batch_results))
+
+                for msg_id in batch_ids:
+                    batch_req.add(
+                        self.service.users().messages().get(
+                            userId="me",
+                            id=msg_id,
+                            format="metadata",
+                            metadataHeaders=["From", "To", "Cc"],
+                        )
+                    )
+
+                batch_req.execute()
+
+            except Exception:
+                # Fallback to individual requests if batch fails
+                for msg_id in batch_ids:
+                    try:
+                        msg = self.service.users().messages().get(
+                            userId="me",
+                            id=msg_id,
+                            format="metadata",
+                            metadataHeaders=["From", "To", "Cc"],
+                        ).execute()
+                        batch_results.append(msg)
+                    except Exception:
+                        continue
+
+            # Process batch results
+            for msg in batch_results:
+                try:
                     headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
 
                     # Parse From
@@ -88,16 +144,14 @@ class GmailFetcher:
                             contacts[email]["count"] += 1
 
                     total_scanned += 1
-
                 except Exception:
                     continue
 
             if progress_cb:
-                progress_cb(f"Scanned {total_scanned} emails... found {len(contacts)} contacts")
-
-            page_token = results.get("nextPageToken")
-            if not page_token:
-                break
+                progress_cb(
+                    f"Scanned {total_scanned}/{len(all_msg_ids)} emails... "
+                    f"found {len(contacts)} contacts"
+                )
 
         return sorted(contacts.values(), key=lambda x: x["count"], reverse=True)
 
