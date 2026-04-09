@@ -454,6 +454,213 @@ if show_filter == "Selected" or len(filtered) <= 100:
             st.success(f"Set {len(filtered)} contacts to {labels}")
             st.rerun()
 
+# ── AI Auto-Tag ──
+st.markdown("---")
+with st.expander("Auto-Tag with AI", expanded=False):
+    st.markdown(
+        "Let AI suggest categories for your contacts based on their name, email address, "
+        "and recent email subjects. You review and approve before anything is saved."
+    )
+
+    ai_scope = st.radio(
+        "Tag which contacts?",
+        ["Untagged only", "All visible", "All selected"],
+        horizontal=True,
+        key="ai_tag_scope",
+    )
+
+    ai_batch_size = st.slider("Contacts per batch", 10, 100, 30, key="ai_batch_size",
+                               help="Larger batches are faster but may hit LLM token limits")
+
+    if st.button("Run AI Auto-Tag", type="primary", key="run_ai_tag"):
+        # Determine which contacts to tag
+        if ai_scope == "Untagged only":
+            to_tag = [s for s in filtered if not _DB.parse_categories(s.get("category"))]
+        elif ai_scope == "All visible":
+            to_tag = filtered
+        else:
+            to_tag = [s for s in senders if s["selected"]]
+
+        if not to_tag:
+            st.warning("No contacts to tag with the selected scope.")
+        else:
+            # Build contact info with recent subjects for context
+            import sqlite3 as _sqlite3
+            conn = _sqlite3.connect(str(db.db_path))
+            conn.row_factory = _sqlite3.Row
+
+            contact_infos = []
+            for s in to_tag:
+                subjects = conn.execute(
+                    "SELECT subject FROM emails WHERE sender_email = ? ORDER BY date_received DESC LIMIT 5",
+                    (s["email"],)
+                ).fetchall()
+                subj_list = [r["subject"] for r in subjects if r["subject"]]
+                contact_infos.append({
+                    "id": s["id"],
+                    "email": s["email"],
+                    "name": s.get("display_name") or "",
+                    "subjects": subj_list[:5],
+                })
+            conn.close()
+
+            # Build LLM
+            from casepulse.llm.api_provider import create_provider
+            try:
+                llm = create_provider(
+                    config.llm_provider,
+                    model=config.llm_model,
+                    api_key=config.llm_api_key,
+                    base_url=config.llm_base_url,
+                )
+            except Exception as e:
+                st.error(f"Could not initialize AI provider: {e}")
+                st.stop()
+
+            cat_list = ", ".join(f"{code} ({label})" for code, label in category_labels.items())
+
+            suggestions = {}
+            progress = st.progress(0, text="Starting AI auto-tag...")
+
+            # Process in batches
+            for batch_start in range(0, len(contact_infos), ai_batch_size):
+                batch = contact_infos[batch_start:batch_start + ai_batch_size]
+                progress.progress(
+                    batch_start / len(contact_infos),
+                    text=f"Tagging {batch_start + 1}–{min(batch_start + ai_batch_size, len(contact_infos))} of {len(contact_infos)}..."
+                )
+
+                # Build prompt
+                contacts_text = ""
+                for i, c in enumerate(batch):
+                    subj_str = "; ".join(c["subjects"]) if c["subjects"] else "no emails fetched"
+                    contacts_text += f"{i+1}. Email: {c['email']}, Name: {c['name']}, Recent subjects: {subj_str}\n"
+
+                prompt = f"""Categorize these contacts for a family law and criminal defence case.
+
+Available categories: {cat_list}
+
+For each contact, suggest 1-3 categories and a confidence percentage (0-100%).
+Consider: the email domain, the person's name, and their email subjects.
+
+Respond in EXACTLY this format, one line per contact, no extra text:
+1. category1,category2 | 85%
+2. category1 | 60%
+...
+
+Contacts:
+{contacts_text}"""
+
+                try:
+                    response = llm.query(
+                        system_prompt="You are a legal case assistant categorizing email contacts. Be precise. Use only the provided category codes.",
+                        user_prompt=prompt,
+                    )
+
+                    # Parse response
+                    for line in response.strip().split("\n"):
+                        line = line.strip()
+                        if not line or not line[0].isdigit():
+                            continue
+                        try:
+                            # Parse "1. cat1,cat2 | 85%"
+                            num_part = line.split(".", 1)
+                            if len(num_part) < 2:
+                                continue
+                            idx = int(num_part[0].strip()) - 1
+                            rest = num_part[1].strip()
+
+                            if "|" in rest:
+                                cats_str, conf_str = rest.rsplit("|", 1)
+                            else:
+                                cats_str = rest
+                                conf_str = "50%"
+
+                            cats = [c.strip().lower().replace(" ", "_") for c in cats_str.split(",")]
+                            cats = [c for c in cats if c in category_labels]
+                            confidence = int(conf_str.strip().replace("%", ""))
+
+                            if 0 <= idx < len(batch) and cats:
+                                contact = batch[idx]
+                                suggestions[contact["id"]] = {
+                                    "email": contact["email"],
+                                    "name": contact["name"],
+                                    "categories": cats,
+                                    "confidence": confidence,
+                                }
+                        except (ValueError, IndexError):
+                            continue
+
+                except Exception as e:
+                    st.warning(f"AI error on batch: {e}")
+
+            progress.progress(1.0, text=f"Done! {len(suggestions)} contacts tagged.")
+
+            if suggestions:
+                st.session_state["ai_suggestions"] = suggestions
+
+    # Show suggestions for review
+    if "ai_suggestions" in st.session_state and st.session_state["ai_suggestions"]:
+        suggestions = st.session_state["ai_suggestions"]
+        st.markdown(f"### Review AI Suggestions ({len(suggestions)} contacts)")
+        st.markdown("Check the ones you want to apply, then click **Apply Approved**.")
+
+        if "ai_approved" not in st.session_state:
+            st.session_state["ai_approved"] = {sid: True for sid in suggestions}
+
+        # Approve/reject all
+        acol1, acol2 = st.columns(2)
+        with acol1:
+            if st.button("Approve All"):
+                st.session_state["ai_approved"] = {sid: True for sid in suggestions}
+                st.rerun()
+        with acol2:
+            if st.button("Reject All"):
+                st.session_state["ai_approved"] = {sid: False for sid in suggestions}
+                st.rerun()
+
+        for sid, sug in suggestions.items():
+            col1, col2, col3, col4 = st.columns([0.5, 3, 3, 1])
+            with col1:
+                approved = st.checkbox(
+                    "a", value=st.session_state["ai_approved"].get(sid, True),
+                    key=f"ai_approve_{sid}", label_visibility="collapsed",
+                )
+                st.session_state["ai_approved"][sid] = approved
+            with col2:
+                name_str = f"**{sug['name']}** — " if sug["name"] else ""
+                st.markdown(f"{name_str}{sug['email']}")
+            with col3:
+                cat_labels = ", ".join(category_labels.get(c, c) for c in sug["categories"])
+                st.markdown(f"{cat_labels}")
+            with col4:
+                conf = sug["confidence"]
+                st.markdown(f"**{conf}%**")
+
+        # Apply button
+        approved_count = sum(1 for v in st.session_state["ai_approved"].values() if v)
+        if st.button(f"Apply {approved_count} Approved Suggestions", type="primary", key="apply_ai_tags"):
+            applied = 0
+            for sid, sug in suggestions.items():
+                if st.session_state["ai_approved"].get(sid):
+                    existing = _DB.parse_categories(
+                        next((s.get("category") for s in senders if s["id"] == sid), "")
+                    )
+                    merged = list(dict.fromkeys(existing + sug["categories"]))
+                    db.set_sender_category(sid, merged)
+                    applied += 1
+            db.log_action("ai_auto_tag", f"Applied AI tags to {applied} contacts")
+            st.success(f"Applied tags to {applied} contacts!")
+            del st.session_state["ai_suggestions"]
+            del st.session_state["ai_approved"]
+            st.rerun()
+
+        if st.button("Discard All Suggestions", key="discard_ai_tags"):
+            del st.session_state["ai_suggestions"]
+            if "ai_approved" in st.session_state:
+                del st.session_state["ai_approved"]
+            st.rerun()
+
 # ── Pagination ──
 ITEMS_PER_PAGE = 50
 
