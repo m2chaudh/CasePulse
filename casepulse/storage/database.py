@@ -199,6 +199,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS export_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    export_id TEXT NOT NULL,
+    export_type TEXT NOT NULL,
+    case_id INTEGER,
+    case_name TEXT DEFAULT '',
+    format TEXT DEFAULT 'pdf',
+    items_count INTEGER DEFAULT 0,
+    filters TEXT DEFAULT '',
+    manifest TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_sender ON emails(sender_email);
 CREATE INDEX IF NOT EXISTS idx_emails_date ON emails(date_received);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
@@ -1146,5 +1159,25 @@ class Database:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ── Export log ──
+
+    def log_export(self, export_id: str, export_type: str, case_id: int = None,
+                   case_name: str = "", fmt: str = "pdf", items_count: int = 0,
+                   filters: str = "", manifest: str = ""):
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO export_log
+                   (export_id, export_type, case_id, case_name, format, items_count, filters, manifest)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (export_id, export_type, case_id, case_name, fmt, items_count, filters, manifest)
+            )
+
+    def get_export_log(self, limit: int = 50) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM export_log ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(r) for r in rows]
