@@ -56,81 +56,158 @@ col1, col2 = st.columns([1, 1])
 with col1:
     scan_clicked = st.button("Scan for Contacts", type="primary", disabled=not selected_accounts)
 with col2:
-    if st.button("Stop Scan", disabled="scan_running" not in st.session_state or not st.session_state.get("scan_running")):
+    if st.button("Stop Scan"):
         st.session_state["scan_cancel"] = True
-        st.info("Cancelling scan after current batch... Contacts found so far are saved.")
 
 if scan_clicked:
-    all_contacts = {}
+    import threading
+    import time
+
     st.session_state["scan_running"] = True
     st.session_state["scan_cancel"] = False
-    cancelled = False
 
-    with st.status("Scanning mailboxes...", expanded=True) as status:
+    # Shared state for parallel threads
+    scan_progress = {}   # {email: "status message"}
+    scan_results = {}    # {email: [contacts]}
+    scan_errors = {}     # {email: "error message"}
+    scan_done = {}       # {email: True/False}
+
+    def scan_one_account(acc_info):
+        """Scan a single account in a background thread."""
+        acc_email = acc_info["email"]
+        scan_progress[acc_email] = "Starting..."
+        scan_done[acc_email] = False
+
+        try:
+            contacts = []
+
+            if acc_info["provider"] == "microsoft":
+                from casepulse.auth.microsoft import MicrosoftAuth
+                auth = MicrosoftAuth(client_id=acc_info.get("client_id", ""), account_email=acc_email)
+                token = auth.get_access_token()
+                if not token:
+                    scan_errors[acc_email] = "Token expired. Re-authenticate in Accounts."
+                    scan_done[acc_email] = True
+                    return
+
+                from casepulse.email_engine.microsoft_fetcher import MicrosoftFetcher
+                fetcher = MicrosoftFetcher(token, acc_info["id"], db)
+                contacts = fetcher.scan_senders(
+                    str(scan_start), str(scan_end),
+                    progress_cb=lambda msg, e=acc_email: scan_progress.update({e: msg}),
+                )
+
+            elif acc_info["provider"] == "google":
+                from casepulse.auth.google_auth import GoogleAuth
+                creds_file = acc_info.get("token_file", "")
+                auth = GoogleAuth(credentials_file=creds_file, account_email=acc_email)
+                service = auth.get_service()
+                if not service:
+                    scan_errors[acc_email] = "Token expired. Re-authenticate in Accounts."
+                    scan_done[acc_email] = True
+                    return
+
+                from casepulse.email_engine.gmail_fetcher import GmailFetcher
+                fetcher = GmailFetcher(service, acc_info["id"], db)
+                contacts = fetcher.scan_senders(
+                    str(scan_start), str(scan_end),
+                    progress_cb=lambda msg, e=acc_email: scan_progress.update({e: msg}),
+                )
+
+            # Save to DB immediately (thread-safe — SQLite WAL mode)
+            for c in contacts:
+                db.upsert_sender(c["email"], c.get("name", ""))
+
+            scan_results[acc_email] = contacts
+            scan_progress[acc_email] = f"Done — {len(contacts)} contacts found"
+
+        except Exception as e:
+            scan_errors[acc_email] = str(e)
+
+        scan_done[acc_email] = True
+
+    # Launch all scans in parallel
+    threads = []
+    for acc in selected_accounts:
+        t = threading.Thread(target=scan_one_account, args=(acc,), daemon=True)
+        threads.append(t)
+        t.start()
+
+    # Create per-account progress containers
+    st.markdown("### Scan Progress")
+    progress_containers = {}
+    for acc in selected_accounts:
+        provider_label = "Microsoft" if acc["provider"] == "microsoft" else "Gmail"
+        st.markdown(f"**{provider_label}: {acc['email']}**")
+        progress_containers[acc["email"]] = st.empty()
+
+    summary_container = st.empty()
+
+    # Poll until all done or cancelled
+    while not all(scan_done.get(acc["email"], False) for acc in selected_accounts):
+        if st.session_state.get("scan_cancel"):
+            break
+
+        # Update progress displays
         for acc in selected_accounts:
-            if st.session_state.get("scan_cancel"):
-                st.write("Scan cancelled by user.")
-                cancelled = True
-                break
+            email = acc["email"]
+            msg = scan_progress.get(email, "Waiting...")
+            if email in scan_errors:
+                progress_containers[email].error(scan_errors[email])
+            elif scan_done.get(email):
+                progress_containers[email].success(msg)
+            else:
+                progress_containers[email].info(msg)
 
-            st.write(f"Scanning {acc['email']}...")
+        completed = sum(1 for acc in selected_accounts if scan_done.get(acc["email"]))
+        summary_container.caption(
+            f"Progress: {completed}/{len(selected_accounts)} accounts complete"
+        )
 
-            try:
-                contacts = []
+        time.sleep(1)
 
-                if acc["provider"] == "microsoft":
-                    from casepulse.auth.microsoft import MicrosoftAuth
-                    auth = MicrosoftAuth(client_id=acc.get("client_id", ""), account_email=acc["email"])
-                    token = auth.get_access_token()
-                    if not token:
-                        st.warning(f"Token expired for {acc['email']}. Please re-authenticate in Accounts.")
-                        continue
-
-                    from casepulse.email_engine.microsoft_fetcher import MicrosoftFetcher
-                    fetcher = MicrosoftFetcher(token, acc["id"], db)
-                    contacts = fetcher.scan_senders(
-                        str(scan_start), str(scan_end),
-                        progress_cb=lambda msg: st.write(msg),
-                    )
-
-                elif acc["provider"] == "google":
-                    from casepulse.auth.google_auth import GoogleAuth
-                    creds_file = acc.get("token_file", "")
-                    auth = GoogleAuth(credentials_file=creds_file, account_email=acc["email"])
-                    service = auth.get_service()
-                    if not service:
-                        st.warning(f"Token expired for {acc['email']}. Please re-authenticate in Accounts.")
-                        continue
-
-                    from casepulse.email_engine.gmail_fetcher import GmailFetcher
-                    fetcher = GmailFetcher(service, acc["id"], db)
-                    contacts = fetcher.scan_senders(
-                        str(scan_start), str(scan_end),
-                        progress_cb=lambda msg: st.write(msg),
-                    )
-
-                # Save contacts to DB immediately (safe for partial scans)
-                for c in contacts:
-                    email = c["email"]
-                    if email not in all_contacts:
-                        all_contacts[email] = c
-                        db.upsert_sender(email, c.get("name", ""))
-                    else:
-                        all_contacts[email]["count"] += c["count"]
-
-                st.write(f"Found {len(contacts)} contacts in {acc['email']}")
-
-            except Exception as e:
-                st.error(f"Error scanning {acc['email']}: {str(e)}")
-
-        st.session_state["scan_running"] = False
-        if cancelled:
-            status.update(
-                label=f"Scan stopped — {len(all_contacts)} contacts saved from completed accounts",
-                state="complete",
-            )
+    # Final update
+    for acc in selected_accounts:
+        email = acc["email"]
+        msg = scan_progress.get(email, "")
+        if email in scan_errors:
+            progress_containers[email].error(f"Error: {scan_errors[email]}")
+        elif scan_done.get(email):
+            progress_containers[email].success(msg)
         else:
-            status.update(label=f"Scan complete — {len(all_contacts)} unique contacts found", state="complete")
+            progress_containers[email].warning("Cancelled")
+
+    # Wait for threads to finish (they're daemon threads so they'll die if we don't)
+    for t in threads:
+        t.join(timeout=2)
+
+    st.session_state["scan_running"] = False
+
+    # Final summary
+    total_contacts = sum(len(r) for r in scan_results.values())
+    all_unique = set()
+    for contacts in scan_results.values():
+        for c in contacts:
+            all_unique.add(c["email"])
+
+    cancelled = st.session_state.get("scan_cancel", False)
+
+    st.markdown("### Scan Summary")
+    for acc in selected_accounts:
+        email = acc["email"]
+        provider_label = "Microsoft" if acc["provider"] == "microsoft" else "Gmail"
+        if email in scan_results:
+            count = len(scan_results[email])
+            st.markdown(f"- **{provider_label}: {email}** — {count:,} contacts found")
+        elif email in scan_errors:
+            st.markdown(f"- **{provider_label}: {email}** — Error: {scan_errors[email]}")
+        else:
+            st.markdown(f"- **{provider_label}: {email}** — Cancelled")
+
+    if cancelled:
+        st.warning(f"Scan stopped. {len(all_unique):,} unique contacts saved from completed accounts.")
+    else:
+        st.success(f"Scan complete. **{len(all_unique):,}** unique contacts found across all accounts.")
 
 st.divider()
 
