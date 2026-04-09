@@ -389,7 +389,7 @@ with col5:
     st.metric("Auto/Noreply", noreply_count)
 
 # ── Bulk actions ──
-col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+col1, col2, col3, col4, col5 = st.columns([1, 1, 1.2, 1.2, 1])
 with col1:
     if st.button("Select All Visible"):
         for s in filtered:
@@ -406,6 +406,15 @@ with col3:
             if s["email"].lower() in two_way_senders:
                 db.set_sender_selected(s["id"], True)
         st.rerun()
+with col4:
+    confirm_clear = st.checkbox(f"Clear all {selected_count} selections", key="confirm_clear")
+with col5:
+    if confirm_clear:
+        if st.button("Confirm Clear", type="primary"):
+            for s in senders:
+                if s["selected"]:
+                    db.set_sender_selected(s["id"], False)
+            st.rerun()
 
 # ── Pagination ──
 ITEMS_PER_PAGE = 50
