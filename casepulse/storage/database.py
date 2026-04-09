@@ -138,6 +138,15 @@ CREATE TABLE IF NOT EXISTS chat_sender_map (
     UNIQUE(chat_sender, platform)
 );
 
+CREATE TABLE IF NOT EXISTS saved_selections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sender_ids TEXT NOT NULL,
+    sender_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS cases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -295,6 +304,55 @@ class Database:
                 "UPDATE senders SET selected = ? WHERE id = ?",
                 (1 if selected else 0, sender_id)
             )
+
+    # ── Saved selection views ──
+
+    def save_selection(self, name: str):
+        """Save current sender selections as a named view."""
+        with self._get_conn() as conn:
+            selected = conn.execute(
+                "SELECT id FROM senders WHERE selected = 1"
+            ).fetchall()
+            ids = json.dumps([r["id"] for r in selected])
+            conn.execute(
+                """INSERT INTO saved_selections (name, sender_ids, sender_count, updated_at)
+                   VALUES (?, ?, ?, datetime('now'))
+                   ON CONFLICT(name) DO UPDATE SET
+                   sender_ids = excluded.sender_ids,
+                   sender_count = excluded.sender_count,
+                   updated_at = datetime('now')""",
+                (name, ids, len(selected))
+            )
+
+    def load_selection(self, name: str, merge: bool = False):
+        """Load a saved selection view.
+
+        If merge=False, clears current selections first (replace).
+        If merge=True, adds saved selections to current ones.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT sender_ids FROM saved_selections WHERE name = ?", (name,)
+            ).fetchone()
+            if not row:
+                return
+
+            ids = json.loads(row["sender_ids"])
+            if not merge:
+                conn.execute("UPDATE senders SET selected = 0")
+            for sid in ids:
+                conn.execute("UPDATE senders SET selected = 1 WHERE id = ?", (sid,))
+
+    def get_saved_selections(self) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM saved_selections ORDER BY updated_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_saved_selection(self, name: str):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM saved_selections WHERE name = ?", (name,))
 
     def set_sender_category(self, sender_id: int, category: str):
         with self._get_conn() as conn:

@@ -562,6 +562,60 @@ if total_pages > 1:
 
 st.divider()
 
+# ── Saved Selection Views ──
+st.markdown("### Saved Selection Views")
+st.markdown("Save your current selections as a named view. Load them back anytime — useful for different cases or strategies.")
+
+saved = db.get_saved_selections()
+
+# Save current
+col1, col2 = st.columns([3, 1])
+with col1:
+    save_name = st.text_input(
+        "Save current selections as",
+        placeholder="e.g., Family Case Contacts, Criminal Defence, All Lawyers...",
+        key="save_sel_name",
+    )
+with col2:
+    st.markdown("")
+    st.markdown("")
+    if st.button("Save", disabled=not save_name or selected_count == 0):
+        db.save_selection(save_name.strip())
+        db.log_action("selection_saved", f"Saved selection '{save_name}' with {selected_count} contacts")
+        st.success(f"Saved '{save_name}' with {selected_count} contacts")
+        st.rerun()
+
+# Show saved views
+if saved:
+    for sv in saved:
+        col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 0.5])
+        with col1:
+            st.markdown(f"**{sv['name']}** — {sv['sender_count']} contacts")
+            st.caption(f"Saved: {sv['updated_at'][:16]}")
+        with col2:
+            if st.button("Load", key=f"load_{sv['id']}", help="Replace current selections with this view"):
+                db.load_selection(sv["name"], merge=False)
+                db.log_action("selection_loaded", f"Loaded selection '{sv['name']}'")
+                st.rerun()
+        with col3:
+            if st.button("Merge", key=f"merge_{sv['id']}", help="Add this view's contacts to current selections"):
+                db.load_selection(sv["name"], merge=True)
+                db.log_action("selection_merged", f"Merged selection '{sv['name']}'")
+                st.rerun()
+        with col4:
+            if st.button("Update", key=f"update_{sv['id']}", help="Overwrite this view with current selections"):
+                db.save_selection(sv["name"])
+                db.log_action("selection_updated", f"Updated selection '{sv['name']}' with {selected_count} contacts")
+                st.rerun()
+        with col5:
+            if st.button("x", key=f"del_{sv['id']}"):
+                db.delete_saved_selection(sv["name"])
+                st.rerun()
+else:
+    st.caption("No saved views yet. Select contacts and save them above.")
+
+st.divider()
+
 # ── Keyword Management ──
 st.markdown("### Keywords")
 st.markdown("Add keywords to filter emails during fetch. Only emails containing at least one keyword will be included.")
