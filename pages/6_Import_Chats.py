@@ -6,24 +6,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from casepulse.storage.database import Database
-from casepulse.config import Config
-
 st.set_page_config(page_title="CasePulse - Import Chats", page_icon="CP", layout="wide")
 
 st.markdown("## Import Chats")
 st.markdown("Import WhatsApp exports, ChatVault HTML, PDF chat exports, and more.")
 
 
-def init():
-    if "db" not in st.session_state:
-        st.session_state.db = Database()
-    if "config" not in st.session_state:
-        st.session_state.config = Config()
-
-
-init()
-db: Database = st.session_state.db
+from components.page_init import init_page
+db, config = init_page()
 
 # ── Import Methods ──
 tab1, tab2, tab3, tab4 = st.tabs([

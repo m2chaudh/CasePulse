@@ -5,29 +5,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from casepulse.storage.database import Database
-from casepulse.config import Config
-
 st.set_page_config(page_title="CasePulse - Ask", page_icon="CP", layout="wide")
 
 st.markdown("## Ask CasePulse")
 st.markdown("Query your emails with AI. Answers include exact citations — zero hallucination.")
 
 
-def init():
-    if "db" not in st.session_state:
-        st.session_state.db = Database()
-    if "config" not in st.session_state:
-        st.session_state.config = Config()
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    if "index_built" not in st.session_state:
-        st.session_state.index_built = False
+from components.page_init import init_page
+db, config = init_page()
 
-
-init()
-db: Database = st.session_state.db
-config: Config = st.session_state.config
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "index_built" not in st.session_state:
+    st.session_state.index_built = False
 
 stats = db.get_stats()
 if stats["total_emails"] == 0:

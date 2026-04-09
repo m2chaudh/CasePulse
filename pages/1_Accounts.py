@@ -7,8 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from casepulse.storage.database import Database
-from casepulse.config import Config, get_data_dir
+from casepulse.config import get_data_dir
 
 st.set_page_config(page_title="CasePulse - Accounts", page_icon="CP", layout="wide")
 
@@ -16,16 +15,8 @@ st.markdown("## Accounts")
 st.markdown("Connect your Outlook, Hotmail, and Gmail accounts.")
 
 
-def init():
-    if "db" not in st.session_state:
-        st.session_state.db = Database()
-    if "config" not in st.session_state:
-        st.session_state.config = Config()
-
-
-init()
-db: Database = st.session_state.db
-config: Config = st.session_state.config
+from components.page_init import init_page
+db, config = init_page()
 
 # ── Show connected accounts ──
 accounts = db.get_accounts()

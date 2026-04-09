@@ -7,8 +7,6 @@ from datetime import date
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from casepulse.storage.database import Database
-from casepulse.config import Config
 from casepulse.legal.exhibits import (
     LEGAL_ISSUES, FLAGS, generate_exhibit_label, preview_exhibit_labels,
 )
@@ -16,20 +14,8 @@ from casepulse.legal.exhibits import (
 st.set_page_config(page_title="CasePulse - Cases", page_icon="CP", layout="wide")
 
 
-def init():
-    if "db" not in st.session_state:
-        st.session_state.db = Database()
-    if "config" not in st.session_state:
-        st.session_state.config = Config()
-    # PIN gate
-    from casepulse.legal.pin_lock import render_pin_gate
-    if not render_pin_gate(st.session_state.db):
-        st.stop()
-
-
-init()
-db: Database = st.session_state.db
-config: Config = st.session_state.config
+from components.page_init import init_page
+db, config = init_page()
 
 st.markdown("## Cases & Evidence Manager")
 

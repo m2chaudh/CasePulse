@@ -7,25 +7,14 @@ from datetime import date, datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from casepulse.storage.database import Database
-from casepulse.config import Config
-
 st.set_page_config(page_title="CasePulse - Timeline", page_icon="CP", layout="wide")
 
 st.markdown("## Timeline")
 st.markdown("Chronological view of all emails and chat messages.")
 
 
-def init():
-    if "db" not in st.session_state:
-        st.session_state.db = Database()
-    if "config" not in st.session_state:
-        st.session_state.config = Config()
-
-
-init()
-db: Database = st.session_state.db
-config: Config = st.session_state.config
+from components.page_init import init_page
+db, config = init_page()
 
 stats = db.get_stats()
 if stats["total_emails"] == 0 and stats.get("total_chat_messages", 0) == 0:

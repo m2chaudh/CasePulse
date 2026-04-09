@@ -6,25 +6,14 @@ from datetime import date
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from casepulse.storage.database import Database
-from casepulse.config import Config
-
 st.set_page_config(page_title="CasePulse - Discover Senders", page_icon="CP", layout="wide")
 
 st.markdown("## Discover Senders")
 st.markdown("Scan your accounts to find all contacts, then select the ones relevant to your case.")
 
 
-def init():
-    if "db" not in st.session_state:
-        st.session_state.db = Database()
-    if "config" not in st.session_state:
-        st.session_state.config = Config()
-
-
-init()
-db: Database = st.session_state.db
-config: Config = st.session_state.config
+from components.page_init import init_page
+db, config = init_page()
 
 accounts = db.get_accounts()
 if not accounts:
