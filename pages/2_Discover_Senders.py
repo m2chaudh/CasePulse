@@ -365,17 +365,24 @@ page_start = st.session_state.sender_page * ITEMS_PER_PAGE
 page_end = min(page_start + ITEMS_PER_PAGE, len(filtered))
 page_items = filtered[page_start:page_end]
 
-# Page navigation
+# Page navigation — use callbacks to avoid session state conflicts
+def go_prev():
+    st.session_state.sender_page = max(0, st.session_state.sender_page - 1)
+
+def go_next():
+    st.session_state.sender_page = min(total_pages - 1, st.session_state.sender_page + 1)
+
+def jump_page():
+    st.session_state.sender_page = st.session_state._page_jump_val - 1
+
 if total_pages > 1:
     nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 3, 1])
     with nav_col1:
-        if st.button("Prev", disabled=st.session_state.sender_page == 0, key="prev_top"):
-            st.session_state.sender_page -= 1
-            st.rerun()
+        st.button("Prev", disabled=st.session_state.sender_page == 0,
+                  key="prev_top", on_click=go_prev)
     with nav_col2:
-        if st.button("Next", disabled=st.session_state.sender_page >= total_pages - 1, key="next_top"):
-            st.session_state.sender_page += 1
-            st.rerun()
+        st.button("Next", disabled=st.session_state.sender_page >= total_pages - 1,
+                  key="next_top", on_click=go_next)
     with nav_col3:
         st.markdown(
             f"**Page {st.session_state.sender_page + 1} of {total_pages}** "
@@ -383,17 +390,14 @@ if total_pages > 1:
             f"Selections are saved automatically across pages"
         )
     with nav_col4:
-        # Page jump without a keyed widget — avoids conflict with Prev/Next
-        jump_val = st.selectbox(
+        st.selectbox(
             "Jump to page",
             list(range(1, total_pages + 1)),
             index=st.session_state.sender_page,
-            key="page_jump_select",
+            key="_page_jump_val",
+            on_change=jump_page,
             label_visibility="collapsed",
         )
-        if jump_val - 1 != st.session_state.sender_page:
-            st.session_state.sender_page = jump_val - 1
-            st.rerun()
 
 st.markdown("---")
 
@@ -481,15 +485,13 @@ if total_pages > 1:
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col1:
-        if st.button("Prev Page", disabled=st.session_state.sender_page == 0, key="prev_bottom"):
-            st.session_state.sender_page -= 1
-            st.rerun()
+        st.button("Prev Page", disabled=st.session_state.sender_page == 0,
+                  key="prev_bottom", on_click=go_prev)
     with col2:
         st.markdown(f"**Page {st.session_state.sender_page + 1} of {total_pages}**")
     with col3:
-        if st.button("Next Page", disabled=st.session_state.sender_page >= total_pages - 1, key="next_bottom"):
-            st.session_state.sender_page += 1
-            st.rerun()
+        st.button("Next Page", disabled=st.session_state.sender_page >= total_pages - 1,
+                  key="next_bottom", on_click=go_next)
 
 st.divider()
 
