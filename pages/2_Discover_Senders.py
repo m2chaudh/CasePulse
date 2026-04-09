@@ -125,6 +125,7 @@ category_labels = {
     "daycare": "Daycare",
     "employer": "Employer",
     "ex_spouse": "Ex-Spouse",
+    "expenses": "Expenses",
     "family": "Family",
     "financial": "Financial",
     "insurance": "Insurance",
@@ -140,6 +141,8 @@ category_labels = {
     "other": "Other",
 }
 categories = list(category_labels.keys())
+
+from casepulse.storage.database import Database as _DB
 
 # Auto-detect known patterns for smart sorting
 NOREPLY_PATTERNS = [
@@ -353,11 +356,12 @@ elif show_filter.startswith("Top "):
     filtered.sort(key=lambda s: email_counts.get(s["email"], 0), reverse=True)
     filtered = filtered[:top_n]
 
-# Category filter
+# Category filter (handles both old single-string and new multi-category format)
 if cat_filter != "All categories":
     cat_code = [k for k, v in category_labels.items() if v == cat_filter]
     if cat_code:
-        filtered = [s for s in filtered if s.get("category") == cat_code[0]]
+        target = cat_code[0]
+        filtered = [s for s in filtered if target in _DB.parse_categories(s.get("category"))]
 
 # Sort
 if sort_by == "Frequency":
@@ -419,21 +423,33 @@ with col5:
 
 # ── Bulk category assignment ──
 if show_filter == "Selected" or len(filtered) <= 100:
-    st.markdown("**Bulk assign category to all visible contacts:**")
-    bcol1, bcol2 = st.columns([2, 1])
+    st.markdown("**Bulk assign categories to all visible contacts:**")
+    bcol1, bcol2, bcol3 = st.columns([3, 1, 1])
     with bcol1:
-        bulk_cat = st.selectbox(
-            "Category for all visible",
+        bulk_cats = st.multiselect(
+            "Categories to add",
             categories,
             format_func=lambda x: category_labels.get(x, x),
             key="bulk_cat_assign",
             label_visibility="collapsed",
+            placeholder="Select categories to add...",
         )
     with bcol2:
-        if st.button(f"Apply to {len(filtered)} visible", key="apply_bulk_cat"):
+        if st.button(f"Add to {len(filtered)} visible", key="apply_bulk_cat", disabled=not bulk_cats):
             for s in filtered:
-                db.set_sender_category(s["id"], bulk_cat)
-            st.success(f"Set {len(filtered)} contacts to {category_labels.get(bulk_cat, bulk_cat)}")
+                existing = _DB.parse_categories(s.get("category"))
+                merged = list(dict.fromkeys(existing + bulk_cats))  # preserve order, no dupes
+                db.set_sender_category(s["id"], merged)
+            labels = ", ".join(category_labels.get(c, c) for c in bulk_cats)
+            st.success(f"Added {labels} to {len(filtered)} contacts")
+            st.rerun()
+    with bcol3:
+        if st.button(f"Replace on {len(filtered)}", key="replace_bulk_cat", disabled=not bulk_cats,
+                      help="Replace all existing categories with the selected ones"):
+            for s in filtered:
+                db.set_sender_category(s["id"], bulk_cats)
+            labels = ", ".join(category_labels.get(c, c) for c in bulk_cats)
+            st.success(f"Set {len(filtered)} contacts to {labels}")
             st.rerun()
 
 # ── Pagination ──
@@ -553,16 +569,18 @@ for sender in page_items:
             pass
 
     with col3:
-        cat = st.selectbox(
-            "Category",
+        current_cats = _DB.parse_categories(sender.get("category"))
+        selected_cats = st.multiselect(
+            "Categories",
             categories,
-            index=categories.index(sender.get("category", "other")),
+            default=current_cats,
             key=f"cat_{sender['id']}",
             format_func=lambda x: category_labels.get(x, x),
             label_visibility="collapsed",
+            placeholder="Assign categories...",
         )
-        if cat != sender.get("category", "other"):
-            db.set_sender_category(sender["id"], cat)
+        if selected_cats != current_cats:
+            db.set_sender_category(sender["id"], selected_cats)
 
     with col4:
         st.caption(f"{freq} emails" if freq else "scanned")

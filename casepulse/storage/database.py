@@ -354,12 +354,35 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM saved_selections WHERE name = ?", (name,))
 
-    def set_sender_category(self, sender_id: int, category: str):
+    def set_sender_category(self, sender_id: int, category):
+        """Set sender category. Accepts a string or list of strings (stored as JSON array)."""
+        if isinstance(category, list):
+            value = json.dumps(category)
+        else:
+            value = category
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE senders SET category = ? WHERE id = ?",
-                (category, sender_id)
+                (value, sender_id)
             )
+
+    @staticmethod
+    def parse_categories(category_value) -> list:
+        """Parse category field — handles both old single-string and new JSON array format."""
+        if not category_value:
+            return []
+        if isinstance(category_value, list):
+            return category_value
+        try:
+            parsed = json.loads(category_value)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Old format: single string
+        if category_value and category_value != "other":
+            return [category_value]
+        return []
 
     def bulk_update_sender_selection(self, selections: dict[int, bool]):
         with self._get_conn() as conn:
