@@ -68,14 +68,25 @@ class GoogleAuth:
             dict with 'credentials', 'account_email' on success,
             or 'error' key on failure.
         """
-        # Try cached credentials first
+        # Try cached credentials first — but verify they match the expected email
         creds = self.get_credentials()
         if creds:
             email = self._get_email_from_creds(creds)
-            return {
-                "credentials": creds,
-                "account_email": email or self.account_email,
-            }
+            if email and self.account_email:
+                # Verify cached creds match the account we're trying to add
+                if email.lower() == self.account_email.lower():
+                    return {
+                        "credentials": creds,
+                        "account_email": email,
+                    }
+                else:
+                    # Cached creds are for a different account — ignore them
+                    creds = None
+            elif email:
+                return {
+                    "credentials": creds,
+                    "account_email": email,
+                }
 
         # Need fresh authentication
         if not Path(self.credentials_file).exists():
