@@ -45,6 +45,13 @@ for acc in accounts:
         selected_accounts.append(acc)
 
 # ── Scan Button ──
+existing_senders = db.get_senders()
+if existing_senders:
+    st.info(
+        f"**{len(existing_senders):,} contacts already saved** from previous scans. "
+        f"Your selections are preserved. Only click Scan again if you changed the date range or added new accounts."
+    )
+
 if st.button("Scan for Contacts", type="primary", disabled=not selected_accounts):
     all_contacts = {}
 
@@ -360,31 +367,32 @@ page_items = filtered[page_start:page_end]
 
 # Page navigation
 if total_pages > 1:
-    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 2, 1, 1])
-    with col1:
-        if st.button("First", disabled=st.session_state.sender_page == 0):
-            st.session_state.sender_page = 0
-            st.rerun()
-    with col2:
-        if st.button("Prev", disabled=st.session_state.sender_page == 0):
+    nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 3, 1])
+    with nav_col1:
+        if st.button("Prev", disabled=st.session_state.sender_page == 0, key="prev_top"):
             st.session_state.sender_page -= 1
             st.rerun()
-    with col3:
-        jump = st.number_input("Page", min_value=1, max_value=total_pages,
-                                value=st.session_state.sender_page + 1,
-                                key="page_jump", label_visibility="collapsed")
-        if jump - 1 != st.session_state.sender_page:
-            st.session_state.sender_page = jump - 1
-            st.rerun()
-    with col4:
-        st.markdown(f"**Page {st.session_state.sender_page + 1} of {total_pages}** ({page_start + 1}–{page_end} of {len(filtered):,})")
-    with col5:
-        if st.button("Next", disabled=st.session_state.sender_page >= total_pages - 1):
+    with nav_col2:
+        if st.button("Next", disabled=st.session_state.sender_page >= total_pages - 1, key="next_top"):
             st.session_state.sender_page += 1
             st.rerun()
-    with col6:
-        if st.button("Last", disabled=st.session_state.sender_page >= total_pages - 1):
-            st.session_state.sender_page = total_pages - 1
+    with nav_col3:
+        st.markdown(
+            f"**Page {st.session_state.sender_page + 1} of {total_pages}** "
+            f"({page_start + 1}–{page_end} of {len(filtered):,}) — "
+            f"Selections are saved automatically across pages"
+        )
+    with nav_col4:
+        # Page jump without a keyed widget — avoids conflict with Prev/Next
+        jump_val = st.selectbox(
+            "Jump to page",
+            list(range(1, total_pages + 1)),
+            index=st.session_state.sender_page,
+            key="page_jump_select",
+            label_visibility="collapsed",
+        )
+        if jump_val - 1 != st.session_state.sender_page:
+            st.session_state.sender_page = jump_val - 1
             st.rerun()
 
 st.markdown("---")
