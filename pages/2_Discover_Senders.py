@@ -154,29 +154,83 @@ def is_noreply(email: str) -> bool:
 st.markdown("### Select Relevant Contacts")
 st.markdown("Check the contacts relevant to your case. Sorted by email frequency — your key contacts are at the top.")
 
+# ── Mailbox filter ──
+all_accounts = db.get_accounts()
+mailbox_options = ["All mailboxes"] + [a["email"] for a in all_accounts]
+selected_mailbox = st.selectbox("View contacts from", mailbox_options, key="mailbox_filter")
+
+# Get account_id for filtering
+selected_account_id = None
+if selected_mailbox != "All mailboxes":
+    for a in all_accounts:
+        if a["email"] == selected_mailbox:
+            selected_account_id = a["id"]
+            break
+
 # ── Build email frequency + domain data upfront ──
 email_counts = {}
 domain_counts = {}
-two_way_senders = set()  # contacts you both sent to AND received from
+two_way_senders = set()
+senders_in_account = None  # set of sender emails for the selected account
 try:
     import sqlite3
     conn = sqlite3.connect(str(db.db_path))
     conn.row_factory = sqlite3.Row
 
-    # Email frequency per sender
-    rows = conn.execute(
-        "SELECT sender_email, COUNT(*) as cnt FROM emails GROUP BY sender_email"
-    ).fetchall()
+    # Email frequency per sender (optionally filtered by account)
+    if selected_account_id:
+        rows = conn.execute(
+            "SELECT sender_email, COUNT(*) as cnt FROM emails WHERE account_id = ? GROUP BY sender_email",
+            (selected_account_id,)
+        ).fetchall()
+        # Also build the set of senders that appear in this account
+        senders_in_account = set()
+        all_in_account = conn.execute(
+            """SELECT DISTINCT sender_email FROM emails WHERE account_id = ?
+               UNION
+               SELECT DISTINCT sender_email FROM emails WHERE account_id = ? AND direction = 'sent'""",
+            (selected_account_id, selected_account_id)
+        ).fetchall()
+        for r in all_in_account:
+            senders_in_account.add(r["sender_email"].lower())
+        # Also include recipients from sent emails in this account
+        recip_rows_acct = conn.execute(
+            "SELECT recipients FROM emails WHERE account_id = ?",
+            (selected_account_id,)
+        ).fetchall()
+        import json as _json
+        for r in recip_rows_acct:
+            recips = r["recipients"]
+            if recips:
+                try:
+                    rlist = _json.loads(recips) if isinstance(recips, str) else recips
+                    for addr in rlist:
+                        email_addr = addr if isinstance(addr, str) else addr.get("email", addr.get("address", ""))
+                        if email_addr:
+                            senders_in_account.add(email_addr.lower())
+                except Exception:
+                    pass
+    else:
+        rows = conn.execute(
+            "SELECT sender_email, COUNT(*) as cnt FROM emails GROUP BY sender_email"
+        ).fetchall()
+
     for r in rows:
         email_counts[r["sender_email"]] = r["cnt"]
 
     # Two-way detection: senders who also appear in recipients
     sent_to = set()
-    recip_rows = conn.execute("SELECT DISTINCT recipients FROM emails WHERE direction = 'sent'").fetchall()
+    if selected_account_id:
+        recip_rows = conn.execute(
+            "SELECT DISTINCT recipients FROM emails WHERE direction = 'sent' AND account_id = ?",
+            (selected_account_id,)
+        ).fetchall()
+    else:
+        recip_rows = conn.execute("SELECT DISTINCT recipients FROM emails WHERE direction = 'sent'").fetchall()
+
     for r in recip_rows:
         recips = r["recipients"]
         if recips:
-            import json as _json
             try:
                 rlist = _json.loads(recips) if isinstance(recips, str) else recips
                 for addr in rlist:
@@ -264,6 +318,10 @@ if subject_search:
 
 # ── Build and filter the list ──
 filtered = list(senders)
+
+# Mailbox filter — only show contacts that appear in the selected account
+if senders_in_account is not None:
+    filtered = [s for s in filtered if s["email"].lower() in senders_in_account]
 
 # Subject search
 if subject_match_senders is not None:
