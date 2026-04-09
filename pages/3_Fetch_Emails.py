@@ -75,19 +75,11 @@ for acc in accounts:
 st.divider()
 
 # ── Fetch Options ──
-col1, col2 = st.columns(2)
-with col1:
-    fetch_all = st.checkbox(
-        "Fetch from all folders (not just Inbox/Sent)",
-        value=False,
-        help="Include Drafts, Archive, etc.",
-    )
-with col2:
-    include_no_sender_filter = st.checkbox(
-        "Include ALL emails (ignore sender filter)",
-        value=not bool(selected_senders),
-        help="Fetch every email in the date range, regardless of sender",
-    )
+include_no_sender_filter = st.checkbox(
+    "Include ALL emails (ignore sender filter)",
+    value=not bool(selected_senders),
+    help="Fetch every email in the date range, regardless of sender",
+)
 
 # ── Fetch Button ──
 if st.button("Start Fetching", type="primary", disabled=not fetch_accounts):

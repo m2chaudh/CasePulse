@@ -285,9 +285,11 @@ with tab_evidence:
                                 exhibit = generate_exhibit_label(selected_case_id, db)
                             else:
                                 exhibit = existing_tag["exhibit_label"]
+                            existing_collection = existing_tag.get("collection", "") if existing_tag else ""
                             db.tag_evidence(
                                 item_type, item_id, selected_case_id,
-                                legal_issue=q_issue, exhibit_label=exhibit, flag=q_flag,
+                                legal_issue=q_issue, exhibit_label=exhibit,
+                                flag=q_flag, collection=existing_collection,
                             )
                             st.rerun()
 
@@ -420,9 +422,13 @@ with tab_settings:
 
     st.divider()
     st.markdown("### Danger Zone")
-    if st.button("Delete This Case", type="secondary"):
-        st.warning(f"This will delete the case '{active_case['name']}' and all its tags and annotations. Evidence items (emails/chats) are NOT deleted.")
-        if st.button("Confirm Delete", type="primary", key="confirm_delete_case"):
+    confirm_delete = st.checkbox(
+        f"I want to delete '{active_case['name']}' and all its tags and annotations",
+        key="confirm_delete_check",
+    )
+    if confirm_delete:
+        st.warning("Evidence items (emails/chats) will NOT be deleted, only tags and annotations for this case.")
+        if st.button("Delete This Case Permanently", type="primary"):
             db.delete_case(selected_case_id)
             db.log_action("case_deleted", f"Deleted case: {active_case['name']}")
             st.rerun()

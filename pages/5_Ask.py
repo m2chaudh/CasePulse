@@ -132,10 +132,20 @@ for msg in st.session_state.chat_history:
                     if source_type == "attachment":
                         st.caption(f"From attachment: {meta.get('filename', '?')}")
 
+# Check for pending query from Quick Query buttons
+pending_query = st.session_state.pop("pending_query", None)
+
 # Chat input
-if prompt := st.chat_input("Ask about your emails... (e.g., 'What settlement offers were discussed?')"):
-    # Add user message
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
+prompt = st.chat_input("Ask about your emails... (e.g., 'What settlement offers were discussed?')")
+
+# Use pending query if no direct input
+if not prompt and pending_query:
+    prompt = pending_query
+
+if prompt:
+    # Add user message if not already in history (pending queries are pre-added)
+    if not pending_query:
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
@@ -225,6 +235,7 @@ with col1:
     for t in templates_left:
         if st.button(t, key=f"tmpl_{t[:20]}"):
             st.session_state.chat_history.append({"role": "user", "content": t})
+            st.session_state["pending_query"] = t
             st.rerun()
 
 with col2:
@@ -238,4 +249,5 @@ with col2:
     for t in templates_right:
         if st.button(t, key=f"tmpl_{t[:20]}"):
             st.session_state.chat_history.append({"role": "user", "content": t})
+            st.session_state["pending_query"] = t
             st.rerun()

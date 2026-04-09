@@ -262,83 +262,83 @@ for email in emails:
 st.divider()
 st.markdown("### Export")
 
+# Build export data upfront so download buttons work on first click
+md_lines = ["# CasePulse Timeline\n"]
+md_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+md_lines.append(f"Date range: {filter_start} to {filter_end}\n")
+md_lines.append(f"Total items: {len(emails)}\n")
+md_lines.append("---\n")
+
+current_date = ""
+for email in emails:
+    dt = email.get("date_received", "")[:10]
+    if dt != current_date:
+        current_date = dt
+        md_lines.append(f"\n## {current_date}\n")
+
+    time_str = email.get("date_received", "")[11:16] if email.get("date_received") else ""
+    sender = email.get("sender_email", "")
+    subject = email.get("subject", "(no subject)")
+    direction = email.get("direction", "")
+    fwd = " [FORWARDED]" if email.get("is_forwarded") else ""
+
+    md_lines.append(f"### {time_str} — {sender} ({direction}){fwd}")
+    md_lines.append(f"**Subject:** {subject}\n")
+
+    body = email.get("body_text", "")
+    if body:
+        preview = body[:500].replace("\n", "\n> ")
+        md_lines.append(f"> {preview}\n")
+
+    attachments = db.get_attachments_for_email(email["id"])
+    if attachments:
+        md_lines.append("**Attachments:**")
+        for att in attachments:
+            md_lines.append(f"- {att['filename']}")
+        md_lines.append("")
+
+md_content = "\n".join(md_lines)
+
+export_data = []
+for email in emails:
+    entry = {
+        "id": email["id"],
+        "date": email.get("date_received", ""),
+        "sender": email.get("sender_email", ""),
+        "sender_name": email.get("sender_name", ""),
+        "recipients": email.get("recipients", ""),
+        "subject": email.get("subject", ""),
+        "body": email.get("body_text", ""),
+        "direction": email.get("direction", ""),
+        "is_forwarded": bool(email.get("is_forwarded")),
+        "original_sender": email.get("original_sender", ""),
+        "attachments": [],
+    }
+    attachments = db.get_attachments_for_email(email["id"])
+    for att in attachments:
+        entry["attachments"].append({
+            "filename": att["filename"],
+            "content_type": att.get("content_type", ""),
+            "size_bytes": att.get("size_bytes", 0),
+            "extracted_text": att.get("extracted_text", ""),
+            "is_duplicate": bool(att.get("is_duplicate")),
+        })
+    export_data.append(entry)
+
+json_content = json.dumps(export_data, indent=2, default=str)
+
 col1, col2 = st.columns(2)
 with col1:
-    if st.button("Export Timeline as Markdown"):
-        md_lines = ["# CasePulse Email Timeline\n"]
-        md_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
-        md_lines.append(f"Date range: {filter_start} to {filter_end}\n")
-        md_lines.append(f"Total emails: {len(emails)}\n")
-        md_lines.append("---\n")
-
-        current_date = ""
-        for email in emails:
-            dt = email.get("date_received", "")[:10]
-            if dt != current_date:
-                current_date = dt
-                md_lines.append(f"\n## {current_date}\n")
-
-            time = email.get("date_received", "")[11:16] if email.get("date_received") else ""
-            sender = email.get("sender_email", "")
-            subject = email.get("subject", "(no subject)")
-            direction = email.get("direction", "")
-            fwd = " [FORWARDED]" if email.get("is_forwarded") else ""
-
-            md_lines.append(f"### {time} — {sender} ({direction}){fwd}")
-            md_lines.append(f"**Subject:** {subject}\n")
-
-            body = email.get("body_text", "")
-            if body:
-                preview = body[:500].replace("\n", "\n> ")
-                md_lines.append(f"> {preview}\n")
-
-            attachments = db.get_attachments_for_email(email["id"])
-            if attachments:
-                md_lines.append("**Attachments:**")
-                for att in attachments:
-                    md_lines.append(f"- {att['filename']}")
-                md_lines.append("")
-
-        md_content = "\n".join(md_lines)
-        st.download_button(
-            "Download Markdown",
-            data=md_content,
-            file_name=f"casepulse_timeline_{filter_start}_{filter_end}.md",
-            mime="text/markdown",
-        )
-
+    st.download_button(
+        "Download Timeline (Markdown)",
+        data=md_content,
+        file_name=f"casepulse_timeline_{filter_start}_{filter_end}.md",
+        mime="text/markdown",
+    )
 with col2:
-    if st.button("Export as JSON"):
-        export_data = []
-        for email in emails:
-            entry = {
-                "id": email["id"],
-                "date": email.get("date_received", ""),
-                "sender": email.get("sender_email", ""),
-                "sender_name": email.get("sender_name", ""),
-                "recipients": email.get("recipients", ""),
-                "subject": email.get("subject", ""),
-                "body": email.get("body_text", ""),
-                "direction": email.get("direction", ""),
-                "is_forwarded": bool(email.get("is_forwarded")),
-                "original_sender": email.get("original_sender", ""),
-                "attachments": [],
-            }
-            attachments = db.get_attachments_for_email(email["id"])
-            for att in attachments:
-                entry["attachments"].append({
-                    "filename": att["filename"],
-                    "content_type": att.get("content_type", ""),
-                    "size_bytes": att.get("size_bytes", 0),
-                    "extracted_text": att.get("extracted_text", ""),
-                    "is_duplicate": bool(att.get("is_duplicate")),
-                })
-            export_data.append(entry)
-
-        json_content = json.dumps(export_data, indent=2, default=str)
-        st.download_button(
-            "Download JSON",
-            data=json_content,
-            file_name=f"casepulse_emails_{filter_start}_{filter_end}.json",
-            mime="application/json",
-        )
+    st.download_button(
+        "Download Timeline (JSON)",
+        data=json_content,
+        file_name=f"casepulse_emails_{filter_start}_{filter_end}.json",
+        mime="application/json",
+    )
