@@ -418,12 +418,13 @@ for sender in page_items:
         else:
             st.markdown(f"**{email_addr}**{tags}")
 
-        # Show matching subjects when subject search is active
-        if subject_match_senders is not None and email_addr in subject_match_senders:
-            try:
-                import sqlite3
-                conn = sqlite3.connect(str(db.db_path))
-                conn.row_factory = sqlite3.Row
+        # Show recent email subjects + dates under every contact
+        try:
+            conn = sqlite3.connect(str(db.db_path))
+            conn.row_factory = sqlite3.Row
+
+            if subject_match_senders is not None and email_addr in subject_match_senders:
+                # Subject search active — show matching emails
                 search_term = f"%{subject_search}%"
                 subj_rows = conn.execute(
                     """SELECT subject, date_received FROM emails
@@ -431,14 +432,26 @@ for sender in page_items:
                        ORDER BY date_received DESC LIMIT 3""",
                     (email_addr, search_term, search_term)
                 ).fetchall()
-                conn.close()
+                match_count = subject_match_senders.get(email_addr, 0)
+                extra = f" +{match_count - 3} more" if match_count > 3 else ""
                 if subj_rows:
-                    previews = [f"*{r['subject'][:60]}* ({r['date_received'][:10]})" for r in subj_rows]
-                    match_count = subject_match_senders[email_addr]
-                    extra = f" +{match_count - 3} more" if match_count > 3 else ""
-                    st.caption(f"Matching: {' | '.join(previews)}{extra}")
-            except Exception:
-                pass
+                    lines = [f"{r['date_received'][:10]} — {r['subject'][:55]}" for r in subj_rows]
+                    st.caption(f"Matching: " + " | ".join(lines) + extra)
+            else:
+                # No subject search — show most recent emails from this sender
+                subj_rows = conn.execute(
+                    """SELECT subject, date_received FROM emails
+                       WHERE sender_email = ?
+                       ORDER BY date_received DESC LIMIT 3""",
+                    (email_addr,)
+                ).fetchall()
+                if subj_rows:
+                    lines = [f"{r['date_received'][:10]} — {r['subject'][:55]}" for r in subj_rows]
+                    st.caption(" | ".join(lines))
+
+            conn.close()
+        except Exception:
+            pass
 
     with col3:
         cat = st.selectbox(
