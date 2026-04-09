@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import Optional
@@ -113,9 +115,32 @@ class MicrosoftAuth:
 
         if callback:
             callback(f"Enter code: {flow['user_code']}")
+            callback(f"Sign in with **{self.account_email}** in the browser window.")
+            callback("Waiting for you to complete sign-in... (this will timeout after 15 minutes)")
 
-        # Wait for user to complete auth (blocks until done or timeout)
-        result = self._app.acquire_token_by_device_flow(flow)
+        # Run blocking call in a thread so it can be interrupted
+        result = {}
+        auth_error = None
+
+        def _do_auth():
+            nonlocal result, auth_error
+            try:
+                result = self._app.acquire_token_by_device_flow(flow)
+            except Exception as e:
+                auth_error = str(e)
+
+        auth_thread = threading.Thread(target=_do_auth, daemon=True)
+        auth_thread.start()
+
+        # Wait with a check interval so the process isn't completely stuck
+        # The thread will complete when user finishes auth or timeout (15 min)
+        auth_thread.join(timeout=900)  # 15 minutes max
+
+        if auth_thread.is_alive():
+            return {"error": "Authentication timed out. Please try again."}
+
+        if auth_error:
+            return {"error": f"Authentication error: {auth_error}"}
 
         if "access_token" in result:
             # Find the account that was just authenticated

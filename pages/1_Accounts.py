@@ -84,7 +84,14 @@ if st.button("Connect Microsoft Account", disabled=not ms_client_id, key=f"ms_co
                 auth = MicrosoftAuth(client_id=ms_client_id, account_email=ms_email_hint)
 
                 st.write("Opening browser for sign-in...")
-                st.write("A code will appear below — enter it in the browser window.")
+                if ms_email_hint:
+                    st.warning(
+                        f"**Important:** When the browser opens, make sure you sign in with "
+                        f"**{ms_email_hint}**, not a different Microsoft account. "
+                        f"If your browser auto-signs in with the wrong account, "
+                        f"click your profile icon in the browser and choose "
+                        f"'Sign in with a different account'."
+                    )
 
                 result = auth.authenticate_interactive(
                     callback=lambda msg: st.write(msg)
@@ -93,27 +100,39 @@ if st.button("Connect Microsoft Account", disabled=not ms_client_id, key=f"ms_co
                 if "error" in result:
                     status.update(label="Authentication failed", state="error")
                     st.error(result["error"])
+                    st.info("To try again, just click 'Connect Microsoft Account' again.")
                 else:
                     email = result["account_email"] or ms_email_hint
-                    display_name = result.get("display_name", "")
 
-                    db.add_account(
-                        provider="microsoft",
-                        email=email,
-                        display_name=display_name,
-                        client_id=ms_client_id,
-                    )
-                    config.add_microsoft_account(email, ms_client_id)
+                    # Check if we authenticated with the right account
+                    if ms_email_hint and email.lower() != ms_email_hint.lower():
+                        status.update(label="Wrong account", state="error")
+                        st.error(
+                            f"You signed in with **{email}** but you entered "
+                            f"**{ms_email_hint}**. The wrong account was authenticated.\n\n"
+                            f"Please try again and make sure to sign in with "
+                            f"**{ms_email_hint}** in the browser."
+                        )
+                        # Don't save the wrong account
+                    else:
+                        display_name = result.get("display_name", "")
+                        db.add_account(
+                            provider="microsoft",
+                            email=email,
+                            display_name=display_name,
+                            client_id=ms_client_id,
+                        )
+                        config.add_microsoft_account(email, ms_client_id)
 
-                    status.update(label=f"Connected: {email}", state="complete")
-                    st.success(f"Successfully connected {email}!")
-                    # Increment counter to reset input fields on rerun
-                    st.session_state.ms_add_counter += 1
-                    st.rerun()
+                        status.update(label=f"Connected: {email}", state="complete")
+                        st.success(f"Successfully connected {email}!")
+                        st.session_state.ms_add_counter += 1
+                        st.rerun()
 
             except Exception as e:
                 status.update(label="Error", state="error")
                 st.error(f"Authentication error: {str(e)}")
+                st.info("To try again, just click 'Connect Microsoft Account' again.")
 
 st.divider()
 
