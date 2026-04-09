@@ -1,0 +1,163 @@
+"""Microsoft OAuth authentication using MSAL for Outlook/Hotmail accounts."""
+from __future__ import annotations
+
+import json
+import threading
+import webbrowser
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse, parse_qs
+
+import msal
+
+from casepulse.config import get_data_dir
+
+# Permissions needed to read mail
+SCOPES = ["Mail.Read", "Mail.ReadBasic", "User.Read"]
+
+# Authority for personal Microsoft accounts (Hotmail, Outlook.com)
+AUTHORITY = "https://login.microsoftonline.com/consumers"
+
+REDIRECT_PORT = 8400
+REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
+
+
+class MicrosoftAuth:
+    """Handles Microsoft OAuth2 authentication for personal accounts."""
+
+    def __init__(self, client_id: str, account_email: str = ""):
+        self.client_id = client_id
+        self.account_email = account_email
+        self._token_dir = get_data_dir() / "tokens"
+        self._token_dir.mkdir(parents=True, exist_ok=True)
+        self._cache = msal.SerializableTokenCache()
+        self._load_cache()
+        self._app = msal.PublicClientApplication(
+            client_id=self.client_id,
+            authority=AUTHORITY,
+            token_cache=self._cache,
+        )
+
+    def _cache_path(self) -> Path:
+        safe_email = self.account_email.replace("@", "_at_").replace(".", "_")
+        return self._token_dir / f"ms_{safe_email}.json"
+
+    def _load_cache(self):
+        cache_file = self._cache_path()
+        if cache_file.exists():
+            self._cache.deserialize(cache_file.read_text())
+
+    def _save_cache(self):
+        if self._cache.has_state_changed:
+            self._cache_path().write_text(self._cache.serialize())
+
+    def get_token_silent(self) -> Optional[str]:
+        """Try to get a token silently from cache."""
+        accounts = self._app.get_accounts()
+        if not accounts:
+            return None
+        result = self._app.acquire_token_silent(SCOPES, account=accounts[0])
+        if result and "access_token" in result:
+            self._save_cache()
+            return result["access_token"]
+        return None
+
+    def authenticate_interactive(self, callback=None) -> dict:
+        """Run interactive OAuth flow via browser.
+
+        Args:
+            callback: Optional function(status: str) for progress updates.
+
+        Returns:
+            dict with 'access_token', 'account_email', 'display_name' on success,
+            or 'error' key on failure.
+        """
+        # Try silent first
+        token = self.get_token_silent()
+        if token:
+            accounts = self._app.get_accounts()
+            return {
+                "access_token": token,
+                "account_email": accounts[0].get("username", self.account_email),
+                "display_name": accounts[0].get("name", ""),
+            }
+
+        # Use device code flow (works better with Streamlit than redirect)
+        if callback:
+            callback("Initiating device code flow...")
+
+        flow = self._app.initiate_device_flow(scopes=SCOPES)
+        if "user_code" not in flow:
+            return {"error": f"Could not initiate auth flow: {flow.get('error_description', 'Unknown error')}"}
+
+        # Open browser for user
+        auth_uri = flow.get("verification_uri", "https://microsoft.com/devicelogin")
+        webbrowser.open(auth_uri)
+
+        if callback:
+            callback(f"Enter code: {flow['user_code']}")
+
+        # Wait for user to complete auth (blocks until done or timeout)
+        result = self._app.acquire_token_by_device_flow(flow)
+
+        if "access_token" in result:
+            self._save_cache()
+            # Get account info
+            accounts = self._app.get_accounts()
+            email = ""
+            display_name = ""
+            if accounts:
+                email = accounts[0].get("username", "")
+                display_name = accounts[0].get("name", "")
+
+            self.account_email = email or self.account_email
+            # Re-save cache with correct filename if email was unknown
+            self._save_cache()
+
+            return {
+                "access_token": result["access_token"],
+                "account_email": email,
+                "display_name": display_name,
+            }
+
+        return {"error": result.get("error_description", "Authentication failed")}
+
+    def get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if needed."""
+        token = self.get_token_silent()
+        if token:
+            return token
+        return None
+
+    def is_authenticated(self) -> bool:
+        """Check if we have a valid cached token."""
+        return self.get_token_silent() is not None
+
+    def logout(self):
+        """Remove cached tokens."""
+        cache_file = self._cache_path()
+        if cache_file.exists():
+            cache_file.unlink()
+        self._cache = msal.SerializableTokenCache()
+        self._app = msal.PublicClientApplication(
+            client_id=self.client_id,
+            authority=AUTHORITY,
+            token_cache=self._cache,
+        )
+
+    def get_user_info(self, access_token: str) -> dict:
+        """Get user profile info from Microsoft Graph."""
+        import requests
+        resp = requests.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if resp.ok:
+            data = resp.json()
+            return {
+                "email": data.get("mail") or data.get("userPrincipalName", ""),
+                "display_name": data.get("displayName", ""),
+            }
+        return {}
