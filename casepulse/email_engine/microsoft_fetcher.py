@@ -64,10 +64,11 @@ class MicrosoftFetcher:
             ),
             "$select": "from,toRecipients,ccRecipients,sentDateTime",
             "$orderby": "receivedDateTime asc",
-            "$top": 250,
+            "$top": 1000,
         }
 
         page = 0
+        total_scanned = 0
         while url:
             data = self._graph_get(url, params if page == 0 else None)
             messages = data.get("value", [])
@@ -102,8 +103,9 @@ class MicrosoftFetcher:
                             senders[email] = {"email": email, "name": name, "count": 0}
                         senders[email]["count"] += 1
 
+            total_scanned += len(messages)
             if progress_cb:
-                progress_cb(f"Scanned {len(messages)} emails on page {page + 1}... found {len(senders)} contacts")
+                progress_cb(f"Scanned {total_scanned} emails... found {len(senders)} contacts")
 
             url = data.get("@odata.nextLink")
             page += 1
