@@ -215,8 +215,9 @@ class MicrosoftFetcher:
 
         # Filter by sender if specified
         if sender_emails:
+            sender_set = set(e.lower() for e in sender_emails)
             all_addrs = [sender_email] + [r["email"] for r in recipients] + [r["email"] for r in cc]
-            if not any(addr in sender_emails for addr in all_addrs):
+            if not any(addr.lower() in sender_set for addr in all_addrs):
                 return "filtered"
 
         # Extract body
