@@ -235,7 +235,7 @@ class MicrosoftFetcher:
             if not any(kw.lower() in searchable for kw in keywords):
                 return "filtered"
 
-        # Check for duplicate by message ID
+        # Check for duplicate by message ID (same account)
         message_id = msg.get("internetMessageId", "")
         if message_id and self.db.email_exists(message_id, self.account_id):
             return "skipped"
@@ -243,6 +243,11 @@ class MicrosoftFetcher:
         # Compute content hash for cross-account dedup
         subject = msg.get("subject", "")
         content_hash = Database.compute_content_hash(body_text, subject, sender_email)
+
+        # Check for cross-account duplicate (same email in another mailbox)
+        existing_id = self.db.content_hash_exists(content_hash)
+        if existing_id:
+            return "skipped"
 
         # Extract internet message headers
         headers = {}

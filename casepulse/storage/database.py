@@ -314,8 +314,25 @@ class Database:
     # ── Email operations ──
 
     @staticmethod
+    def normalize_subject(subject: str) -> str:
+        """Strip RE:/FW:/Fwd: prefixes for dedup matching."""
+        import re
+        s = subject.strip()
+        # Repeatedly strip common prefixes
+        while True:
+            m = re.match(r"^(?:RE|Re|re|FW|Fw|fw|FWD|Fwd|fwd)\s*:\s*", s)
+            if m:
+                s = s[m.end():]
+            else:
+                break
+        return s.strip()
+
+    @staticmethod
     def compute_content_hash(body_text: str, subject: str, sender: str) -> str:
-        content = f"{subject}|{sender}|{body_text}"
+        """Compute hash for cross-account dedup. Normalizes subject to handle FW:/RE: prefixes."""
+        normalized_subject = Database.normalize_subject(subject)
+        # Use only subject + body for hash (not sender) so forwards from different senders match
+        content = f"{normalized_subject}|{body_text}"
         return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
 
     def email_exists(self, message_id: str, account_id: int) -> bool:
@@ -328,12 +345,22 @@ class Database:
             ).fetchone()
             return row is not None
 
-    def content_hash_exists(self, content_hash: str) -> Optional[int]:
+    def content_hash_exists(self, content_hash: str, exclude_account_id: Optional[int] = None) -> Optional[int]:
+        """Check if an email with this content hash already exists (cross-account dedup).
+
+        Returns the existing email ID, or None.
+        """
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT id FROM emails WHERE content_hash = ? LIMIT 1",
-                (content_hash,)
-            ).fetchone()
+            if exclude_account_id:
+                row = conn.execute(
+                    "SELECT id FROM emails WHERE content_hash = ? AND account_id != ? LIMIT 1",
+                    (content_hash, exclude_account_id)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT id FROM emails WHERE content_hash = ? LIMIT 1",
+                    (content_hash,)
+                ).fetchone()
             return row["id"] if row else None
 
     def insert_email(self, **kwargs) -> int:
@@ -756,6 +783,11 @@ class Database:
         """Get combined email + chat timeline, sorted chronologically."""
         items = []
 
+        # Build account lookup
+        account_map = {}
+        for acc in self.get_accounts():
+            account_map[acc["id"]] = acc["email"]
+
         # Emails
         emails = self.get_emails(
             date_start=date_start, date_end=date_end,
@@ -774,6 +806,7 @@ class Database:
                 "has_attachments": bool(e.get("has_attachments")),
                 "source_id": e["id"],
                 "platform": "email",
+                "account": account_map.get(e.get("account_id"), ""),
             })
 
         # Chat messages

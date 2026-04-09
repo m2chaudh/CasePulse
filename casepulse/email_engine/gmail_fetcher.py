@@ -235,6 +235,11 @@ class GmailFetcher:
         # Content hash for dedup
         content_hash = Database.compute_content_hash(body_text, subject, sender_email)
 
+        # Check for cross-account duplicate
+        existing_id = self.db.content_hash_exists(content_hash)
+        if existing_id:
+            return "skipped"
+
         # Parse forwarded content
         from casepulse.email_engine.parser import detect_forwarded_content
         is_forwarded, original_sender, original_date = detect_forwarded_content(

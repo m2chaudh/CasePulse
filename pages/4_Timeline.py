@@ -40,16 +40,20 @@ with col2:
 with col3:
     filter_keyword = st.text_input("Search", placeholder="Search emails...", key="tl_search")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     selected_senders = db.get_senders(selected_only=True)
     sender_options = ["All senders"] + [s["email"] for s in selected_senders]
     filter_sender = st.selectbox("Sender", sender_options, key="tl_sender")
 with col2:
-    filter_direction = st.selectbox("Direction", ["All", "received", "sent"], key="tl_dir")
+    all_accounts = db.get_accounts()
+    account_options = ["All accounts"] + [a["email"] for a in all_accounts]
+    filter_account = st.selectbox("Mailbox", account_options, key="tl_account")
 with col3:
-    filter_attachments = st.selectbox("Attachments", ["All", "With attachments", "Without attachments"], key="tl_att")
+    filter_direction = st.selectbox("Direction", ["All", "received", "sent"], key="tl_dir")
 with col4:
+    filter_attachments = st.selectbox("Attachments", ["All", "With attachments", "Without attachments"], key="tl_att")
+with col5:
     filter_source = st.selectbox("Source", ["All", "Emails only", "Chats only"], key="tl_source")
 
 # ── Fetch data ──
@@ -115,6 +119,10 @@ emails = db.get_emails(
     has_attachments=has_att,
     limit=5000,
 )
+
+# Apply account filter
+if filter_account != "All accounts":
+    timeline_items = [t for t in timeline_items if t.get("account") == filter_account or t["type"] == "chat"]
 
 email_count = sum(1 for t in timeline_items if t["type"] == "email")
 chat_count = sum(1 for t in timeline_items if t["type"] == "chat")
@@ -186,6 +194,9 @@ st.divider()
 # ── Email List ──
 st.markdown("### Emails")
 
+# Build account lookup for display
+account_lookup = {a["id"]: a["email"] for a in db.get_accounts()}
+
 for email in emails:
     dt = email.get("date_received", "")[:19] if email.get("date_received") else "Unknown date"
     sender = email.get("sender_email", "Unknown")
@@ -193,14 +204,16 @@ for email in emails:
     subject = email.get("subject", "(no subject)")
     direction = email.get("direction", "")
     is_fwd = email.get("is_forwarded")
+    source_account = account_lookup.get(email.get("account_id"), "")
 
     # Direction indicator
     dir_icon = "<-" if direction == "received" else "->" if direction == "sent" else "  "
     fwd_tag = " [FWD]" if is_fwd else ""
+    account_tag = f" [{source_account}]" if source_account else ""
 
     display_sender = f"{sender_name} ({sender})" if sender_name else sender
 
-    with st.expander(f"{dt} | {dir_icon} {display_sender} | {subject}{fwd_tag}"):
+    with st.expander(f"{dt} | {dir_icon} {display_sender} | {subject}{fwd_tag}{account_tag}"):
         col1, col2 = st.columns([3, 1])
 
         with col1:
@@ -234,6 +247,8 @@ for email in emails:
 
         with col2:
             st.markdown(f"**Direction:** {direction}")
+            if source_account:
+                st.markdown(f"**Mailbox:** {source_account}")
             st.markdown(f"**Attachments:** {'Yes' if email.get('has_attachments') else 'No'}")
 
         # Body
