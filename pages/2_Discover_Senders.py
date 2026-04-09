@@ -122,6 +122,7 @@ categories = [
     "other", "my_lawyer", "opposing_lawyer", "ex_spouse",
     "police", "cas_worker", "therapist", "court", "mediator",
     "financial", "family", "witness", "school", "employer",
+    "daycare", "travel",
 ]
 category_labels = {
     "other": "Other",
@@ -138,6 +139,8 @@ category_labels = {
     "witness": "Witness",
     "school": "School",
     "employer": "Employer",
+    "daycare": "Daycare",
+    "travel": "Travel",
 }
 
 # Auto-detect known patterns for smart sorting
