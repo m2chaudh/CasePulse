@@ -193,6 +193,19 @@ st.divider()
 # ── Current Data Summary ──
 st.markdown("### Current Data")
 stats = db.get_stats()
+
+# Per-account breakdown
+import sqlite3 as _sql
+_conn = _sql.connect(str(db.db_path))
+_conn.row_factory = _sql.Row
+_per_account = _conn.execute("""
+    SELECT a.email, a.provider, COUNT(e.id) as email_count,
+           COUNT(DISTINCT e.sender_email) as sender_count
+    FROM accounts a LEFT JOIN emails e ON a.id = e.account_id
+    GROUP BY a.id ORDER BY email_count DESC
+""").fetchall()
+_conn.close()
+
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("Total Emails", f"{stats['total_emails']:,}")
@@ -201,25 +214,93 @@ with col2:
 with col3:
     st.metric("Duplicate Attachments", f"{stats['duplicate_attachments']:,}")
 with col4:
-    if stats["earliest_email"]:
-        st.metric("Date Range", f"{stats['earliest_email'][:10]} to {stats['latest_email'][:10]}")
+    if stats.get("latest_email"):
+        earliest = stats['earliest_email'][:10] if stats.get('earliest_email') else '?'
+        st.metric("Date Range", f"{earliest} to {stats['latest_email'][:10]}")
     else:
         st.metric("Date Range", "No data")
+
+# Per-account breakdown
+if _per_account:
+    st.markdown("**Per account:**")
+    for r in _per_account:
+        provider = "Microsoft" if r["provider"] == "microsoft" else "Gmail"
+        st.caption(f"  {provider}: {r['email']} — {r['email_count']:,} emails from {r['sender_count']:,} senders")
 
 # Sync history
 sync_history = db.get_sync_history(limit=10)
 if sync_history:
     st.markdown("### Sync History")
+    all_accounts = db.get_accounts()
+    acc_map = {a["id"]: a["email"] for a in all_accounts}
     for sync in sync_history:
-        acc = db.get_accounts()
-        acc_email = ""
-        for a in acc:
-            if a["id"] == sync["account_id"]:
-                acc_email = a["email"]
-                break
-        status_icon = "+" if sync["status"] == "completed" else "x"
+        acc_email = acc_map.get(sync["account_id"], "?")
+        status_icon = "+" if sync["status"] == "completed" else "..." if sync["status"] == "running" else "x"
         st.markdown(
-            f"[{status_icon}] **{acc_email}** — {sync['started_at']} — "
-            f"{sync['emails_fetched']} emails, {sync['attachments_downloaded']} attachments "
+            f"[{status_icon}] **{acc_email}** — {sync['started_at'][:16]} — "
+            f"{sync['emails_fetched']:,} emails, {sync['attachments_downloaded']:,} attachments "
             f"({sync['status']})"
         )
+
+# ── Cleanup Tools ──
+st.divider()
+with st.expander("Data Management"):
+    st.markdown("### Delete Emails by Account")
+    st.markdown("Remove all fetched emails from a specific account. Contacts and selections are NOT affected.")
+
+    all_accounts = db.get_accounts()
+    if all_accounts:
+        for acc in all_accounts:
+            _conn2 = _sql.connect(str(db.db_path))
+            _conn2.row_factory = _sql.Row
+            count = _conn2.execute("SELECT COUNT(*) as c FROM emails WHERE account_id = ?", (acc["id"],)).fetchone()["c"]
+            _conn2.close()
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                provider = "Microsoft" if acc["provider"] == "microsoft" else "Gmail"
+                st.markdown(f"**{provider}: {acc['email']}** — {count:,} emails")
+            with col2:
+                if count > 0:
+                    if st.button(f"Delete {count:,} emails", key=f"del_emails_{acc['id']}"):
+                        st.session_state[f"confirm_del_{acc['id']}"] = True
+
+            if st.session_state.get(f"confirm_del_{acc['id']}"):
+                confirm = st.checkbox(
+                    f"I confirm: delete all {count:,} emails from {acc['email']}",
+                    key=f"confirm_check_{acc['id']}",
+                )
+                if confirm:
+                    if st.button(f"Confirm Delete", key=f"confirm_btn_{acc['id']}", type="primary"):
+                        _conn3 = _sql.connect(str(db.db_path))
+                        # Delete attachments first
+                        _conn3.execute("""DELETE FROM attachments WHERE email_id IN
+                                         (SELECT id FROM emails WHERE account_id = ?)""", (acc["id"],))
+                        _conn3.execute("DELETE FROM emails WHERE account_id = ?", (acc["id"],))
+                        _conn3.execute("DELETE FROM sync_log WHERE account_id = ?", (acc["id"],))
+                        _conn3.execute("UPDATE accounts SET last_synced = NULL WHERE id = ?", (acc["id"],))
+                        _conn3.commit()
+                        _conn3.close()
+                        db.log_action("emails_deleted", f"Deleted {count} emails from {acc['email']}")
+                        st.session_state.pop(f"confirm_del_{acc['id']}", None)
+                        st.success(f"Deleted {count:,} emails from {acc['email']}")
+                        st.rerun()
+
+    st.divider()
+
+    st.markdown("### Clear All Email Data")
+    st.markdown("Delete ALL fetched emails, attachments, and sync history across all accounts. Contacts and selections are preserved.")
+    clear_all = st.checkbox("I want to clear all email data and start fresh", key="clear_all_emails")
+    if clear_all:
+        total = stats["total_emails"]
+        if st.button(f"Delete ALL {total:,} emails", type="primary", key="clear_all_btn"):
+            _conn4 = _sql.connect(str(db.db_path))
+            _conn4.execute("DELETE FROM attachments")
+            _conn4.execute("DELETE FROM emails")
+            _conn4.execute("DELETE FROM sync_log")
+            _conn4.execute("UPDATE accounts SET last_synced = NULL")
+            _conn4.commit()
+            _conn4.close()
+            db.log_action("all_emails_deleted", f"Cleared all {total} emails")
+            st.success(f"Deleted all {total:,} emails. You can re-fetch anytime.")
+            st.rerun()
