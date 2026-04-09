@@ -199,6 +199,43 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    content_type TEXT DEFAULT '',
+    size_bytes INTEGER DEFAULT 0,
+    content_hash TEXT UNIQUE,
+    extracted_text TEXT DEFAULT '',
+    ocr_status TEXT DEFAULT 'pending',
+    source_dir TEXT DEFAULT '',
+    timeline_date TEXT DEFAULT '',
+    timeline_date_auto INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS timeline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    time TEXT DEFAULT '',
+    approx TEXT DEFAULT 'exact',
+    category TEXT DEFAULT 'context',
+    description TEXT NOT NULL,
+    source_type TEXT DEFAULT '',
+    source_id INTEGER,
+    source_file TEXT DEFAULT '',
+    refs TEXT DEFAULT '',
+    strength TEXT DEFAULT 'unassessed',
+    contradicts TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    case_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(content_hash);
+CREATE INDEX IF NOT EXISTS idx_timeline_date ON timeline_events(date);
+
 CREATE TABLE IF NOT EXISTS export_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     export_id TEXT NOT NULL,
@@ -1181,3 +1218,119 @@ class Database:
                 "SELECT * FROM export_log ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ── Document operations ──
+
+    def insert_document(self, filename: str, file_path: str, content_type: str,
+                        size_bytes: int, content_hash: str, extracted_text: str = "",
+                        ocr_status: str = "pending", source_dir: str = "") -> Optional[int]:
+        """Insert a document. Returns None if duplicate (same hash)."""
+        with self._get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id, filename FROM documents WHERE content_hash = ?", (content_hash,)
+            ).fetchone()
+            if existing:
+                return None  # Duplicate
+            cur = conn.execute(
+                """INSERT INTO documents (filename, file_path, content_type, size_bytes,
+                   content_hash, extracted_text, ocr_status, source_dir)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (filename, file_path, content_type, size_bytes, content_hash,
+                 extracted_text, ocr_status, source_dir)
+            )
+            return cur.lastrowid
+
+    def get_documents(self, ocr_status: Optional[str] = None) -> list[dict]:
+        with self._get_conn() as conn:
+            if ocr_status:
+                rows = conn.execute(
+                    "SELECT * FROM documents WHERE ocr_status = ? ORDER BY created_at DESC",
+                    (ocr_status,)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM documents ORDER BY created_at DESC").fetchall()
+            return [dict(r) for r in rows]
+
+    def get_document(self, doc_id: int) -> Optional[dict]:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
+            return dict(row) if row else None
+
+    def update_document(self, doc_id: int, **kwargs):
+        allowed = {"extracted_text", "ocr_status", "timeline_date", "timeline_date_auto", "notes"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE documents SET {set_clause} WHERE id = ?",
+                         list(updates.values()) + [doc_id])
+
+    def get_document_by_hash(self, content_hash: str) -> Optional[dict]:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM documents WHERE content_hash = ?", (content_hash,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_document(self, doc_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+
+    # ── Timeline event operations ──
+
+    def add_timeline_event(self, date: str, description: str, time: str = "",
+                           approx: str = "exact", category: str = "context",
+                           source_type: str = "", source_id: int = None,
+                           source_file: str = "", refs: str = "",
+                           strength: str = "unassessed", contradicts: str = "",
+                           notes: str = "", case_id: int = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO timeline_events
+                   (date, time, approx, category, description, source_type,
+                    source_id, source_file, refs, strength, contradicts, notes, case_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (date, time, approx, category, description, source_type,
+                 source_id, source_file, refs, strength, contradicts, notes, case_id)
+            )
+            return cur.lastrowid
+
+    def get_timeline_events(self, case_id: int = None, category: str = None,
+                             date_start: str = None, date_end: str = None,
+                             limit: int = 5000) -> list[dict]:
+        conditions = []
+        params = []
+        if case_id:
+            conditions.append("case_id = ?")
+            params.append(case_id)
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if date_start:
+            conditions.append("date >= ?")
+            params.append(date_start)
+        if date_end:
+            conditions.append("date <= ?")
+            params.append(date_end)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        params.append(limit)
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM timeline_events WHERE {where} ORDER BY date ASC, time ASC LIMIT ?",
+                params
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_timeline_event(self, event_id: int, **kwargs):
+        allowed = {"date", "time", "approx", "category", "description", "source_type",
+                    "source_id", "source_file", "refs", "strength", "contradicts", "notes", "case_id"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE timeline_events SET {set_clause} WHERE id = ?",
+                         list(updates.values()) + [event_id])
+
+    def delete_timeline_event(self, event_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM timeline_events WHERE id = ?", (event_id,))
