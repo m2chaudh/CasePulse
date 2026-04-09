@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import json
-import threading
 import webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse, parse_qs
 
 import msal
 
@@ -19,12 +16,13 @@ SCOPES = ["Mail.Read", "Mail.ReadBasic", "User.Read"]
 # Authority for personal Microsoft accounts (Hotmail, Outlook.com)
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 
-REDIRECT_PORT = 8400
-REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
-
 
 class MicrosoftAuth:
-    """Handles Microsoft OAuth2 authentication for personal accounts."""
+    """Handles Microsoft OAuth2 authentication for personal accounts.
+
+    Each account gets its own separate token cache file to avoid
+    cross-account token confusion.
+    """
 
     def __init__(self, client_id: str, account_email: str = ""):
         self.client_id = client_id
@@ -52,12 +50,27 @@ class MicrosoftAuth:
         if self._cache.has_state_changed:
             self._cache_path().write_text(self._cache.serialize())
 
-    def get_token_silent(self) -> Optional[str]:
-        """Try to get a token silently from cache."""
+    def _find_matching_account(self):
+        """Find the MSAL cached account matching self.account_email."""
         accounts = self._app.get_accounts()
         if not accounts:
             return None
-        result = self._app.acquire_token_silent(SCOPES, account=accounts[0])
+        if self.account_email:
+            for acc in accounts:
+                username = acc.get("username", "").lower()
+                if username == self.account_email.lower():
+                    return acc
+        # Only return first account if we have exactly one (no ambiguity)
+        if len(accounts) == 1:
+            return accounts[0]
+        return None
+
+    def get_token_silent(self) -> Optional[str]:
+        """Try to get a token silently from cache for THIS specific account."""
+        account = self._find_matching_account()
+        if not account:
+            return None
+        result = self._app.acquire_token_silent(SCOPES, account=account)
         if result and "access_token" in result:
             self._save_cache()
             return result["access_token"]
@@ -66,6 +79,9 @@ class MicrosoftAuth:
     def authenticate_interactive(self, callback=None) -> dict:
         """Run interactive OAuth flow via browser.
 
+        Always uses device code flow for new accounts. Only uses silent
+        auth if we find a cached token matching this exact email.
+
         Args:
             callback: Optional function(status: str) for progress updates.
 
@@ -73,17 +89,19 @@ class MicrosoftAuth:
             dict with 'access_token', 'account_email', 'display_name' on success,
             or 'error' key on failure.
         """
-        # Try silent first
-        token = self.get_token_silent()
-        if token:
-            accounts = self._app.get_accounts()
-            return {
-                "access_token": token,
-                "account_email": accounts[0].get("username", self.account_email),
-                "display_name": accounts[0].get("name", ""),
-            }
+        # Try silent only if we have a specific email to match
+        if self.account_email:
+            token = self.get_token_silent()
+            if token:
+                account = self._find_matching_account()
+                if account:
+                    return {
+                        "access_token": token,
+                        "account_email": account.get("username", self.account_email),
+                        "display_name": account.get("name", ""),
+                    }
 
-        # Use device code flow (works better with Streamlit than redirect)
+        # Device code flow — always prompts user to sign in
         if callback:
             callback("Initiating device code flow...")
 
@@ -102,17 +120,29 @@ class MicrosoftAuth:
         result = self._app.acquire_token_by_device_flow(flow)
 
         if "access_token" in result:
-            self._save_cache()
-            # Get account info
+            # Find the account that was just authenticated
             accounts = self._app.get_accounts()
             email = ""
             display_name = ""
+
             if accounts:
-                email = accounts[0].get("username", "")
-                display_name = accounts[0].get("name", "")
+                # Find the newly added account (might not be accounts[0])
+                # The token result contains id_token_claims with the email
+                claims = result.get("id_token_claims", {})
+                preferred = claims.get("preferred_username", "")
+
+                if preferred:
+                    email = preferred
+                    for acc in accounts:
+                        if acc.get("username", "").lower() == preferred.lower():
+                            display_name = acc.get("name", "")
+                            break
+                else:
+                    # Fallback: use the last account added
+                    email = accounts[-1].get("username", "")
+                    display_name = accounts[-1].get("name", "")
 
             self.account_email = email or self.account_email
-            # Re-save cache with correct filename if email was unknown
             self._save_cache()
 
             return {
@@ -125,10 +155,7 @@ class MicrosoftAuth:
 
     def get_access_token(self) -> Optional[str]:
         """Get a valid access token, refreshing if needed."""
-        token = self.get_token_silent()
-        if token:
-            return token
-        return None
+        return self.get_token_silent()
 
     def is_authenticated(self) -> bool:
         """Check if we have a valid cached token."""
