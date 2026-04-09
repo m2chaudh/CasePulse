@@ -37,6 +37,10 @@ def start_fetch_job(db: Database, accounts: list[dict],
         }),
     )
 
+    # Capture sender_emails explicitly to avoid closure issues
+    _sender_emails = list(sender_emails) if sender_emails else None
+    _keywords = list(keywords) if keywords else None
+
     def _run():
         # Create a fresh DB connection for this thread
         _db = Database()
@@ -44,6 +48,10 @@ def start_fetch_job(db: Database, accounts: list[dict],
         total_attachments = 0
         total_skipped = 0
         errors = []
+
+        # Log what filter we're using
+        filter_info = f"sender_filter={len(_sender_emails) if _sender_emails else 'NONE'}"
+        _db.update_job_progress(job_id, f"Starting... {filter_info}")
 
         try:
             for acc in accounts:
@@ -56,7 +64,7 @@ def start_fetch_job(db: Database, accounts: list[dict],
                                                  "attachments": total_attachments}))
                     return
 
-                _db.update_job_progress(job_id, f"Fetching {acc['email']}...")
+                _db.update_job_progress(job_id, f"Fetching {acc['email']}... {filter_info}")
 
                 try:
                     if acc["provider"] == "microsoft":
@@ -78,8 +86,8 @@ def start_fetch_job(db: Database, accounts: list[dict],
 
                         result = fetcher.fetch_emails(
                             date_start, date_end,
-                            sender_emails=sender_emails,
-                            keywords=keywords,
+                            sender_emails=_sender_emails,
+                            keywords=_keywords,
                             progress_cb=_ms_progress,
                         )
 
@@ -103,8 +111,8 @@ def start_fetch_job(db: Database, accounts: list[dict],
 
                         result = fetcher.fetch_emails(
                             date_start, date_end,
-                            sender_emails=sender_emails,
-                            keywords=keywords,
+                            sender_emails=_sender_emails,
+                            keywords=_keywords,
                             progress_cb=_gmail_progress,
                         )
 
