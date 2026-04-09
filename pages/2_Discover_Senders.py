@@ -786,13 +786,14 @@ with ai_tab1:
                 st.session_state.pop("ai_approved", None)
                 st.rerun()
 
-# ── Tab 2: AI Assistant ──
+# ── Tab 2: AI Assistant — executes actions directly ──
 with ai_tab2:
     st.markdown(
-        "Give natural language commands to manage your contacts. Examples:\n"
-        "- *Tag all contacts from @lawfirm.com as My Lawyer*\n"
-        "- *Select everyone who emailed about custody*\n"
-        "- *Who are my most frequent contacts that I haven't tagged yet?*\n"
+        "Tell AI what to do — it will **execute the actions directly**. Examples:\n"
+        "- *Tag all @goldfamilylaw.ca as My Lawyer*\n"
+        "- *Tag all Manisha contacts as Ex-Spouse*\n"
+        "- *Canada Life is benefits*\n"
+        "- *Select all police contacts*\n"
         "- *Deselect all noreply addresses*"
     )
 
@@ -810,7 +811,7 @@ with ai_tab2:
             st.markdown(ai_prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
+            with st.spinner("Processing..."):
                 try:
                     from casepulse.llm.api_provider import create_provider
                     llm = create_provider(
@@ -818,57 +819,147 @@ with ai_tab2:
                         api_key=config.llm_api_key, base_url=config.llm_base_url,
                     )
 
-                    # Build context about current contacts
                     import sqlite3 as _sqlite3
                     conn = _sqlite3.connect(str(db.db_path))
                     conn.row_factory = _sqlite3.Row
 
-                    total_senders = conn.execute("SELECT COUNT(*) as c FROM senders").fetchone()["c"]
-                    selected_senders_count = conn.execute("SELECT COUNT(*) as c FROM senders WHERE selected = 1").fetchone()["c"]
-                    tagged_count = conn.execute("SELECT COUNT(*) as c FROM senders WHERE category != 'other' AND category IS NOT NULL AND category != ''").fetchone()["c"]
-
-                    # Get sample of contacts for context
-                    sample = conn.execute(
-                        "SELECT email, display_name, category, selected FROM senders ORDER BY RANDOM() LIMIT 20"
+                    # Get all contacts for context
+                    all_senders_data = conn.execute(
+                        "SELECT id, email, display_name, category FROM senders"
                     ).fetchall()
-                    sample_text = "\n".join(
-                        f"- {r['email']} (name: {r['display_name'] or '?'}, category: {r['category'] or 'none'}, selected: {'yes' if r['selected'] else 'no'})"
-                        for r in sample
-                    )
+                    all_senders_list = [dict(r) for r in all_senders_data]
 
                     # Top domains
                     domains = conn.execute(
-                        "SELECT SUBSTR(email, INSTR(email, '@')+1) as domain, COUNT(*) as cnt FROM senders GROUP BY domain ORDER BY cnt DESC LIMIT 15"
+                        "SELECT SUBSTR(email, INSTR(email, '@')+1) as domain, COUNT(*) as cnt FROM senders GROUP BY domain ORDER BY cnt DESC LIMIT 30"
                     ).fetchall()
-                    domain_text = ", ".join(f"{r['domain']} ({r['cnt']})" for r in domains)
-
+                    domain_text = ", ".join(f"{r['domain']}({r['cnt']})" for r in domains)
                     conn.close()
 
-                    cat_list = ", ".join(f"{code}={label}" for code, label in category_labels.items())
+                    cat_codes = list(category_labels.keys())
+                    cat_list = ", ".join(f"{code}" for code in cat_codes)
 
-                    system_prompt = f"""You are a contact management assistant for CasePulse, a legal case tool.
+                    system_prompt = f"""You are a contact tagging engine. You parse user instructions and output ONLY a JSON array of actions.
 
-Contact stats: {total_senders} total, {selected_senders_count} selected, {tagged_count} tagged.
-Top domains: {domain_text}
-Categories available: {cat_list}
+Available category codes: {cat_list}
+Top email domains: {domain_text}
 
-Sample contacts:
-{sample_text}
+Output format — ONLY valid JSON, no other text:
+[
+  {{"action": "tag", "match": "search_term", "match_type": "domain|name|email", "category": "category_code"}},
+  {{"action": "tag", "match": "search_term", "match_type": "domain|name|email", "category": "category_code"}},
+  {{"action": "select", "match": "search_term", "match_type": "domain|name|email"}},
+  {{"action": "deselect", "match": "search_term", "match_type": "domain|name|email"}}
+]
 
-You can suggest actions like:
-- "Tag all @domain.com contacts as [category]"
-- "Select contacts matching [criteria]"
-- "Show untagged contacts with high email volume"
+match_type:
+- "domain" = match the email domain (e.g., "goldfamilylaw.ca")
+- "name" = match display name or email contains this text (e.g., "manisha", "nirlep")
+- "email" = exact email match
 
-Respond with clear actionable advice. If the user wants to do something, explain which filters/buttons to use in the Discover Senders page, or suggest specific bulk operations.
-You cannot directly modify the database — suggest UI actions the user should take."""
+Examples:
+User: "Tag all @goldfamilylaw.ca as My Lawyer"
+Output: [{{"action":"tag","match":"goldfamilylaw.ca","match_type":"domain","category":"my_lawyer"}}]
+
+User: "Manisha is ex wife, nirlep is her lawyer"
+Output: [{{"action":"tag","match":"manisha","match_type":"name","category":"ex_spouse"}},{{"action":"tag","match":"nirlep","match_type":"name","category":"opposing_lawyer"}}]
+
+User: "Canada Life is benefits, Michelle Abel is my lawyer"
+Output: [{{"action":"tag","match":"canadalife","match_type":"name","category":"benefits"}},{{"action":"tag","match":"michelle abel","match_type":"name","category":"my_lawyer"}}]
+
+ONLY output the JSON array. No explanations."""
 
                     response = llm.query(
                         system_prompt=system_prompt,
                         user_prompt=ai_prompt,
                     )
 
+                    # Parse JSON actions from response
+                    import json as _json
+                    # Extract JSON from response (might have markdown backticks)
+                    json_text = response.strip()
+                    if "```" in json_text:
+                        json_text = json_text.split("```")[1]
+                        if json_text.startswith("json"):
+                            json_text = json_text[4:]
+                        json_text = json_text.strip()
+
+                    actions = _json.loads(json_text)
+
+                    if not isinstance(actions, list):
+                        actions = [actions]
+
+                    # Execute actions
+                    results = []
+                    total_affected = 0
+
+                    for act in actions:
+                        action_type = act.get("action", "")
+                        match_term = act.get("match", "").lower()
+                        match_type = act.get("match_type", "name")
+                        category = act.get("category", "")
+
+                        if not match_term:
+                            continue
+
+                        # Find matching contacts
+                        matched = []
+                        for s in all_senders_list:
+                            email_lower = s["email"].lower()
+                            name_lower = (s.get("display_name") or "").lower()
+
+                            if match_type == "domain":
+                                if email_lower.endswith(f"@{match_term}") or match_term in email_lower.split("@")[-1]:
+                                    matched.append(s)
+                            elif match_type == "email":
+                                if email_lower == match_term:
+                                    matched.append(s)
+                            else:  # name
+                                if match_term in name_lower or match_term in email_lower:
+                                    matched.append(s)
+
+                        if not matched:
+                            results.append(f"No contacts found matching '{match_term}'")
+                            continue
+
+                        if action_type == "tag" and category:
+                            cat_label = category_labels.get(category, category)
+                            for s in matched:
+                                existing = _DB.parse_categories(s.get("category"))
+                                if category not in existing:
+                                    merged = list(dict.fromkeys(existing + [category]))
+                                    db.set_sender_category(s["id"], merged)
+                            results.append(f"Tagged **{len(matched)}** contacts matching '{match_term}' as **{cat_label}**")
+                            total_affected += len(matched)
+
+                        elif action_type == "select":
+                            for s in matched:
+                                db.set_sender_selected(s["id"], True)
+                            results.append(f"Selected **{len(matched)}** contacts matching '{match_term}'")
+                            total_affected += len(matched)
+
+                        elif action_type == "deselect":
+                            for s in matched:
+                                db.set_sender_selected(s["id"], False)
+                            results.append(f"Deselected **{len(matched)}** contacts matching '{match_term}'")
+                            total_affected += len(matched)
+
+                    # Show results
+                    if results:
+                        result_text = "**Done!** Here's what I did:\n\n" + "\n".join(f"- {r}" for r in results)
+                        result_text += f"\n\n**Total: {total_affected} contacts updated.**"
+                        st.markdown(result_text)
+                        st.session_state["ai_chat_history"].append({"role": "assistant", "content": result_text})
+                        db.log_action("ai_assistant", f"Executed {len(actions)} actions on {total_affected} contacts")
+                    else:
+                        st.warning("Could not parse any actions from AI response.")
+                        st.caption(f"Raw response: {response[:500]}")
+                        st.session_state["ai_chat_history"].append({"role": "assistant", "content": "Could not parse actions."})
+
+                except _json.JSONDecodeError:
+                    # LLM didn't return valid JSON — fall back to showing raw response
                     st.markdown(response)
+                    st.caption("(AI responded with text instead of actions — try rephrasing your request)")
                     st.session_state["ai_chat_history"].append({"role": "assistant", "content": response})
 
                 except Exception as e:
