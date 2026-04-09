@@ -187,42 +187,55 @@ class GmailFetcher:
 
             query = " ".join(query_parts)
 
+            # First, list all matching message IDs
+            if progress_cb:
+                progress_cb("Listing matching emails...")
+
+            all_msg_ids = []
             page_token = None
             while True:
                 results = self.service.users().messages().list(
                     userId="me",
                     q=query,
                     pageToken=page_token,
-                    maxResults=100,
+                    maxResults=500,
                 ).execute()
 
                 messages = results.get("messages", [])
                 if not messages:
                     break
 
-                for msg_stub in messages:
-                    try:
-                        result = self._process_message(msg_stub["id"], sender_emails, keywords)
-                        if result == "stored":
-                            total_fetched += 1
-                        elif result == "skipped":
-                            total_skipped += 1
-                        elif isinstance(result, int):
-                            # Number of attachments
-                            total_fetched += 1
-                            total_attachments += result
-                    except Exception as e:
-                        errors.append(f"Error processing {msg_stub['id']}: {str(e)}")
-
+                all_msg_ids.extend([m["id"] for m in messages])
                 if progress_cb:
-                    progress_cb(
-                        f"{total_fetched} stored, {total_skipped} skipped, "
-                        f"{total_attachments} attachments"
-                    )
+                    progress_cb(f"Found {len(all_msg_ids)} matching emails...")
 
                 page_token = results.get("nextPageToken")
                 if not page_token:
                     break
+
+            if progress_cb:
+                progress_cb(f"Total: {len(all_msg_ids)} emails to fetch. Downloading...")
+
+            # Process each message with per-message progress
+            for i, msg_id in enumerate(all_msg_ids):
+                try:
+                    result = self._process_message(msg_id, sender_emails, keywords)
+                    if result == "stored":
+                        total_fetched += 1
+                    elif result == "skipped":
+                        total_skipped += 1
+                    elif isinstance(result, int):
+                        total_fetched += 1
+                        total_attachments += result
+                except Exception as e:
+                    errors.append(f"Error processing {msg_id}: {str(e)}")
+
+                if progress_cb and (i + 1) % 5 == 0:
+                    progress_cb(
+                        f"Fetching {i + 1}/{len(all_msg_ids)} — "
+                        f"{total_fetched} stored, {total_skipped} skipped, "
+                        f"{total_attachments} attachments"
+                    )
 
             self.db.update_sync(sync_id, total_fetched, total_attachments, total_skipped)
             self.db.complete_sync(sync_id, "completed", "; ".join(errors) if errors else "")
