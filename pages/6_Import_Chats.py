@@ -229,7 +229,8 @@ categories = [
     "disclosure", "docusign", "employer", "evidence", "ex_spouse",
     "expenses", "family", "family_law_assistant", "family_lawyer",
     "financial", "insurance",
-    "me", "mediation", "mediator", "moving", "my_lawyer",
+    "me", "mediation", "mediator", "moving",
+    "my_gmail", "my_hotmail", "my_lawyer", "myself",
     "opposing_lawyer", "police", "school", "therapist", "travel",
     "witness", "other",
 ]
