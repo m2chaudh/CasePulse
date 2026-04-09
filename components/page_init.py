@@ -27,4 +27,18 @@ def init_page():
     if not render_pin_gate(db):
         st.stop()
 
+    # Show running background jobs in sidebar
+    running_jobs = db.get_running_jobs()
+    if running_jobs:
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown("**Background Jobs**")
+            for job in running_jobs:
+                job_type = job["job_type"].replace("_", " ").title()
+                progress = job.get("progress", "Starting...")
+                st.info(f"**{job_type}**\n\n{progress}")
+                if st.button("Cancel", key=f"cancel_job_{job['id']}"):
+                    db.cancel_job(job["id"])
+                    st.rerun()
+
     return db, config

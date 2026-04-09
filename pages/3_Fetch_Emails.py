@@ -81,112 +81,58 @@ include_no_sender_filter = st.checkbox(
     help="Fetch every email in the date range, regardless of sender",
 )
 
-# ── Fetch Button ──
-col1, col2 = st.columns([1, 1])
-with col1:
-    fetch_clicked = st.button("Start Fetching", type="primary", disabled=not fetch_accounts)
-with col2:
-    if st.button("Stop Fetch"):
-        st.session_state["fetch_cancel"] = True
+# ── Check for running fetch job ──
+running_jobs = db.get_running_jobs("fetch_emails")
 
-if fetch_clicked:
-    st.session_state["fetch_cancel"] = False
-    sender_emails = None
-    if not include_no_sender_filter and selected_senders:
-        sender_emails = [s["email"] for s in selected_senders]
+if running_jobs:
+    job = running_jobs[0]
+    st.info(f"**Fetch in progress** (Job #{job['id']})")
+    st.markdown(f"**Status:** {job.get('progress', 'Starting...')}")
+    st.caption(f"Started: {job['started_at'][:16]} | Accounts: {job.get('account_email', '')}")
 
-    keyword_list = [k["keyword"] for k in keywords] if keywords else None
-
-    total_results = {
-        "emails_fetched": 0,
-        "attachments_downloaded": 0,
-        "duplicates_skipped": 0,
-        "errors": [],
-    }
-
-    cancelled = False
-
-    with st.status("Fetching emails...", expanded=True) as status:
-        for acc in fetch_accounts:
-            if st.session_state.get("fetch_cancel"):
-                st.write("Fetch cancelled by user.")
-                cancelled = True
-                break
-
-            st.write(f"--- Fetching from {acc['email']} ---")
-
-            try:
-                if acc["provider"] == "microsoft":
-                    from casepulse.auth.microsoft import MicrosoftAuth
-                    auth = MicrosoftAuth(client_id=acc.get("client_id", ""), account_email=acc["email"])
-                    token = auth.get_access_token()
-                    if not token:
-                        st.warning(f"Token expired for {acc['email']}. Please re-authenticate.")
-                        continue
-
-                    from casepulse.email_engine.microsoft_fetcher import MicrosoftFetcher
-                    fetcher = MicrosoftFetcher(token, acc["id"], db)
-                    result = fetcher.fetch_emails(
-                        str(fetch_start), str(fetch_end),
-                        sender_emails=sender_emails,
-                        keywords=keyword_list,
-                        progress_cb=lambda msg: st.write(msg),
-                    )
-
-                elif acc["provider"] == "google":
-                    from casepulse.auth.google_auth import GoogleAuth
-                    creds_file = acc.get("token_file", "")
-                    auth = GoogleAuth(credentials_file=creds_file, account_email=acc["email"])
-                    service = auth.get_service()
-                    if not service:
-                        st.warning(f"Token expired for {acc['email']}. Please re-authenticate.")
-                        continue
-
-                    from casepulse.email_engine.gmail_fetcher import GmailFetcher
-                    fetcher = GmailFetcher(service, acc["id"], db)
-                    result = fetcher.fetch_emails(
-                        str(fetch_start), str(fetch_end),
-                        sender_emails=sender_emails,
-                        keywords=keyword_list,
-                        progress_cb=lambda msg: st.write(msg),
-                    )
-
-                total_results["emails_fetched"] += result["emails_fetched"]
-                total_results["attachments_downloaded"] += result["attachments_downloaded"]
-                total_results["duplicates_skipped"] += result["duplicates_skipped"]
-                total_results["errors"].extend(result.get("errors", []))
-
-                st.write(
-                    f"Done: {result['emails_fetched']} emails, "
-                    f"{result['attachments_downloaded']} attachments, "
-                    f"{result['duplicates_skipped']} duplicates skipped"
-                )
-
-            except Exception as e:
-                st.error(f"Error fetching from {acc['email']}: {str(e)}")
-                total_results["errors"].append(str(e))
-
-        if cancelled:
-            status.update(label=f"Fetch stopped — {total_results['emails_fetched']} emails saved from completed accounts", state="complete")
-        else:
-            status.update(label="Fetch complete!", state="complete")
-
-    # Summary
-    st.markdown("### Fetch Results")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns([1, 3])
     with col1:
-        st.metric("Emails Fetched", total_results["emails_fetched"])
+        if st.button("Cancel Fetch", type="secondary"):
+            db.cancel_job(job["id"])
+            st.success("Cancel requested. Fetch will stop after the current email.")
+            st.rerun()
     with col2:
-        st.metric("Attachments Downloaded", total_results["attachments_downloaded"])
-    with col3:
-        st.metric("Duplicates Skipped", total_results["duplicates_skipped"])
+        if st.button("Refresh Progress"):
+            st.rerun()
 
-    if total_results["errors"]:
-        with st.expander(f"Errors ({len(total_results['errors'])})"):
-            for err in total_results["errors"]:
-                st.error(err)
+else:
+    # Show recent completed job
+    recent = db.get_recent_jobs(limit=1)
+    if recent and recent[0]["job_type"] == "fetch_emails" and recent[0]["status"] in ("completed", "cancelled"):
+        last = recent[0]
+        try:
+            import json as _json
+            result_data = _json.loads(last.get("result", "{}"))
+            st.success(
+                f"Last fetch ({last['status']}): "
+                f"{result_data.get('fetched', 0):,} emails, "
+                f"{result_data.get('skipped', 0):,} skipped, "
+                f"{result_data.get('attachments', 0):,} attachments"
+            )
+        except Exception:
+            pass
 
-    st.success("Emails fetched! Go to **Timeline** to view them or **Ask** to query with AI.")
+    # Fetch button
+    if st.button("Start Fetching (Background)", type="primary", disabled=not fetch_accounts):
+        sender_emails = None
+        if not include_no_sender_filter and selected_senders:
+            sender_emails = [s["email"] for s in selected_senders]
+
+        keyword_list = [k["keyword"] for k in keywords] if keywords else None
+
+        from casepulse.jobs import start_fetch_job
+        job_id = start_fetch_job(
+            db, fetch_accounts,
+            date_start=str(fetch_start), date_end=str(fetch_end),
+            sender_emails=sender_emails, keywords=keyword_list,
+        )
+        st.success(f"Fetch started in background (Job #{job_id}). You can navigate to other pages — progress shows in the sidebar.")
+        st.rerun()
 
 st.divider()
 
@@ -226,6 +172,36 @@ if _per_account:
     for r in _per_account:
         provider = "Microsoft" if r["provider"] == "microsoft" else "Gmail"
         st.caption(f"  {provider}: {r['email']} — {r['email_count']:,} emails from {r['sender_count']:,} senders")
+
+# Per-contact breakdown
+with st.expander("Emails by Contact"):
+    _conn_contacts = _sql.connect(str(db.db_path))
+    _conn_contacts.row_factory = _sql.Row
+    _contact_counts = _conn_contacts.execute("""
+        SELECT e.sender_email, e.sender_name, COUNT(*) as cnt,
+               MIN(e.date_received) as first_email, MAX(e.date_received) as last_email
+        FROM emails e
+        GROUP BY e.sender_email
+        ORDER BY cnt DESC
+        LIMIT 200
+    """).fetchall()
+    _conn_contacts.close()
+
+    if _contact_counts:
+        search_contacts = st.text_input("Filter contacts", placeholder="Search...", key="contact_breakdown_search")
+        filtered_contacts = _contact_counts
+        if search_contacts:
+            search_lower = search_contacts.lower()
+            filtered_contacts = [c for c in _contact_counts
+                                  if search_lower in c["sender_email"].lower()
+                                  or search_lower in (c["sender_name"] or "").lower()]
+
+        st.caption(f"Showing {len(filtered_contacts)} contacts (top 200 by volume)")
+        for c in filtered_contacts:
+            name = f"{c['sender_name']} — " if c['sender_name'] else ""
+            first = c['first_email'][:10] if c['first_email'] else '?'
+            last = c['last_email'][:10] if c['last_email'] else '?'
+            st.caption(f"  {name}{c['sender_email']} — **{c['cnt']:,}** emails ({first} to {last})")
 
 # Sync history
 sync_history = db.get_sync_history(limit=10)
@@ -285,6 +261,59 @@ with st.expander("Data Management"):
                         st.session_state.pop(f"confirm_del_{acc['id']}", None)
                         st.success(f"Deleted {count:,} emails from {acc['email']}")
                         st.rerun()
+
+    st.divider()
+
+    st.markdown("### Delete Emails by Contact")
+    st.markdown("Remove emails from specific senders. Useful for cleaning up irrelevant contacts.")
+
+    _conn_del = _sql.connect(str(db.db_path))
+    _conn_del.row_factory = _sql.Row
+    _sender_counts = _conn_del.execute("""
+        SELECT sender_email, sender_name, COUNT(*) as cnt
+        FROM emails GROUP BY sender_email ORDER BY cnt DESC LIMIT 100
+    """).fetchall()
+    _conn_del.close()
+
+    if _sender_counts:
+        del_search = st.text_input("Search contacts to delete", placeholder="Search...", key="del_contact_search")
+        del_filtered = _sender_counts
+        if del_search:
+            dl = del_search.lower()
+            del_filtered = [s for s in _sender_counts
+                            if dl in s["sender_email"].lower() or dl in (s["sender_name"] or "").lower()]
+
+        del_options = {s["sender_email"]: f"{s['sender_name'] or ''} ({s['sender_email']}) — {s['cnt']:,} emails"
+                       for s in del_filtered[:50]}
+
+        contacts_to_delete = st.multiselect(
+            "Select contacts to delete emails from",
+            list(del_options.keys()),
+            format_func=lambda x: del_options.get(x, x),
+            key="del_contacts_select",
+        )
+
+        if contacts_to_delete:
+            total_to_delete = sum(s["cnt"] for s in del_filtered if s["sender_email"] in contacts_to_delete)
+            confirm_del_contacts = st.checkbox(
+                f"Confirm: delete {total_to_delete:,} emails from {len(contacts_to_delete)} contacts",
+                key="confirm_del_contacts",
+            )
+            if confirm_del_contacts:
+                if st.button(f"Delete {total_to_delete:,} emails", type="primary", key="del_contacts_btn"):
+                    _conn_dc = _sql.connect(str(db.db_path))
+                    deleted = 0
+                    for email_addr in contacts_to_delete:
+                        _conn_dc.execute("""DELETE FROM attachments WHERE email_id IN
+                                            (SELECT id FROM emails WHERE sender_email = ?)""", (email_addr,))
+                        cur = _conn_dc.execute("DELETE FROM emails WHERE sender_email = ?", (email_addr,))
+                        deleted += cur.rowcount
+                    _conn_dc.commit()
+                    _conn_dc.close()
+                    db.log_action("emails_deleted_by_contact",
+                                  f"Deleted {deleted} emails from {len(contacts_to_delete)} contacts: {', '.join(contacts_to_delete[:5])}")
+                    st.success(f"Deleted {deleted:,} emails from {len(contacts_to_delete)} contacts")
+                    st.rerun()
 
     st.divider()
 

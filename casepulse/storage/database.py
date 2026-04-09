@@ -236,6 +236,18 @@ CREATE TABLE IF NOT EXISTS timeline_events (
 CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(content_hash);
 CREATE INDEX IF NOT EXISTS idx_timeline_date ON timeline_events(date);
 
+CREATE TABLE IF NOT EXISTS background_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_type TEXT NOT NULL,
+    status TEXT DEFAULT 'running',
+    progress TEXT DEFAULT '',
+    account_email TEXT DEFAULT '',
+    details TEXT DEFAULT '',
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    result TEXT DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS export_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     export_id TEXT NOT NULL,
@@ -1196,6 +1208,56 @@ class Database:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ── Background jobs ──
+
+    def create_job(self, job_type: str, account_email: str = "", details: str = "") -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO background_jobs (job_type, account_email, details) VALUES (?, ?, ?)",
+                (job_type, account_email, details)
+            )
+            return cur.lastrowid
+
+    def update_job_progress(self, job_id: int, progress: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE background_jobs SET progress = ? WHERE id = ?", (progress, job_id))
+
+    def complete_job(self, job_id: int, status: str = "completed", result: str = ""):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE background_jobs SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ?",
+                (status, result, job_id)
+            )
+
+    def get_running_jobs(self, job_type: str = None) -> list[dict]:
+        with self._get_conn() as conn:
+            if job_type:
+                rows = conn.execute(
+                    "SELECT * FROM background_jobs WHERE status = 'running' AND job_type = ?",
+                    (job_type,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM background_jobs WHERE status = 'running'"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_job(self, job_id: int) -> Optional[dict]:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
+            return dict(row) if row else None
+
+    def cancel_job(self, job_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE background_jobs SET status = 'cancelled' WHERE id = ?", (job_id,))
+
+    def get_recent_jobs(self, limit: int = 10) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM background_jobs ORDER BY started_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(r) for r in rows]
 
