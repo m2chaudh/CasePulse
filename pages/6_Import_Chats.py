@@ -227,7 +227,8 @@ sender_maps = db.get_chat_sender_maps()
 categories = [
     "benefits", "cas_worker", "court", "criminal_lawyer", "daycare",
     "disclosure", "docusign", "employer", "evidence", "ex_spouse",
-    "expenses", "family", "family_lawyer", "financial", "insurance",
+    "expenses", "family", "family_law_assistant", "family_lawyer",
+    "financial", "insurance",
     "me", "mediation", "mediator", "moving", "my_lawyer",
     "opposing_lawyer", "police", "school", "therapist", "travel",
     "witness", "other",

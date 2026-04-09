@@ -234,6 +234,7 @@ category_labels = {
     "ex_spouse": "Ex-Spouse",
     "expenses": "Expenses",
     "family": "Family",
+    "family_law_assistant": "Family Law Assistant",
     "family_lawyer": "Family Law Lawyer",
     "financial": "Financial",
     "insurance": "Insurance",
