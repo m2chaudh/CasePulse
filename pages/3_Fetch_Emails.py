@@ -82,7 +82,15 @@ include_no_sender_filter = st.checkbox(
 )
 
 # ── Fetch Button ──
-if st.button("Start Fetching", type="primary", disabled=not fetch_accounts):
+col1, col2 = st.columns([1, 1])
+with col1:
+    fetch_clicked = st.button("Start Fetching", type="primary", disabled=not fetch_accounts)
+with col2:
+    if st.button("Stop Fetch"):
+        st.session_state["fetch_cancel"] = True
+
+if fetch_clicked:
+    st.session_state["fetch_cancel"] = False
     sender_emails = None
     if not include_no_sender_filter and selected_senders:
         sender_emails = [s["email"] for s in selected_senders]
@@ -96,8 +104,15 @@ if st.button("Start Fetching", type="primary", disabled=not fetch_accounts):
         "errors": [],
     }
 
+    cancelled = False
+
     with st.status("Fetching emails...", expanded=True) as status:
         for acc in fetch_accounts:
+            if st.session_state.get("fetch_cancel"):
+                st.write("Fetch cancelled by user.")
+                cancelled = True
+                break
+
             st.write(f"--- Fetching from {acc['email']} ---")
 
             try:
@@ -151,7 +166,10 @@ if st.button("Start Fetching", type="primary", disabled=not fetch_accounts):
                 st.error(f"Error fetching from {acc['email']}: {str(e)}")
                 total_results["errors"].append(str(e))
 
-        status.update(label="Fetch complete!", state="complete")
+        if cancelled:
+            status.update(label=f"Fetch stopped — {total_results['emails_fetched']} emails saved from completed accounts", state="complete")
+        else:
+            status.update(label="Fetch complete!", state="complete")
 
     # Summary
     st.markdown("### Fetch Results")
