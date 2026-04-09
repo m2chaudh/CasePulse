@@ -52,14 +52,32 @@ if existing_senders:
         f"Your selections are preserved. Only click Scan again if you changed the date range or added new accounts."
     )
 
-if st.button("Scan for Contacts", type="primary", disabled=not selected_accounts):
+col1, col2 = st.columns([1, 1])
+with col1:
+    scan_clicked = st.button("Scan for Contacts", type="primary", disabled=not selected_accounts)
+with col2:
+    if st.button("Stop Scan", disabled="scan_running" not in st.session_state or not st.session_state.get("scan_running")):
+        st.session_state["scan_cancel"] = True
+        st.info("Cancelling scan after current batch... Contacts found so far are saved.")
+
+if scan_clicked:
     all_contacts = {}
+    st.session_state["scan_running"] = True
+    st.session_state["scan_cancel"] = False
+    cancelled = False
 
     with st.status("Scanning mailboxes...", expanded=True) as status:
         for acc in selected_accounts:
+            if st.session_state.get("scan_cancel"):
+                st.write("Scan cancelled by user.")
+                cancelled = True
+                break
+
             st.write(f"Scanning {acc['email']}...")
 
             try:
+                contacts = []
+
                 if acc["provider"] == "microsoft":
                     from casepulse.auth.microsoft import MicrosoftAuth
                     auth = MicrosoftAuth(client_id=acc.get("client_id", ""), account_email=acc["email"])
@@ -91,22 +109,28 @@ if st.button("Scan for Contacts", type="primary", disabled=not selected_accounts
                         progress_cb=lambda msg: st.write(msg),
                     )
 
-                # Merge contacts
+                # Save contacts to DB immediately (safe for partial scans)
                 for c in contacts:
                     email = c["email"]
-                    if email in all_contacts:
-                        all_contacts[email]["count"] += c["count"]
-                    else:
+                    if email not in all_contacts:
                         all_contacts[email] = c
-                        # Register in database
                         db.upsert_sender(email, c.get("name", ""))
+                    else:
+                        all_contacts[email]["count"] += c["count"]
 
                 st.write(f"Found {len(contacts)} contacts in {acc['email']}")
 
             except Exception as e:
                 st.error(f"Error scanning {acc['email']}: {str(e)}")
 
-        status.update(label=f"Scan complete — {len(all_contacts)} unique contacts found", state="complete")
+        st.session_state["scan_running"] = False
+        if cancelled:
+            status.update(
+                label=f"Scan stopped — {len(all_contacts)} contacts saved from completed accounts",
+                state="complete",
+            )
+        else:
+            status.update(label=f"Scan complete — {len(all_contacts)} unique contacts found", state="complete")
 
 st.divider()
 
