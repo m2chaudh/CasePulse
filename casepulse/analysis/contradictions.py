@@ -295,31 +295,66 @@ def find_contradictions(llm: LLMProvider, statements: list[dict],
     if progress_cb:
         progress_cb(f"Analyzing {len(statements)} statements from {person_name} for contradictions...")
 
-    # Build statements text
+    # If too many statements, process in chunks of 60
+    MAX_BATCH = 60
+    if len(statements) > MAX_BATCH:
+        all_contradictions = []
+        for chunk_start in range(0, len(statements), MAX_BATCH):
+            chunk = statements[chunk_start:chunk_start + MAX_BATCH]
+            if len(chunk) < 2:
+                continue
+            if progress_cb:
+                progress_cb(f"Checking statements {chunk_start + 1}-{chunk_start + len(chunk)} of {len(statements)}...")
+
+            stmts_text = ""
+            for i, s in enumerate(chunk):
+                stmts_text += f"{i+1}. [{s['date']}] ({s['category']}) {s['statement']} (Source: {s['source_type']} - {s['source_subject']})\n"
+
+            prompt = f"""Analyze these statements by {person_name} and find contradictions.
+For each contradiction found, output EXACTLY this format:
+STMT_A_NUM | STMT_B_NUM | TYPE | SEVERITY | EXPLANATION
+Types: date_inconsistency, factual_contradiction, changing_narrative, amount_discrepancy, denial_vs_evidence
+Severity: high, medium, low
+Statements:
+{stmts_text}"""
+
+            try:
+                response = llm.query(
+                    system_prompt="You are a legal analyst finding contradictions in witness statements. Be thorough but precise.",
+                    user_prompt=prompt,
+                )
+                for line in response.strip().split("\n"):
+                    line = line.strip()
+                    if "|" not in line:
+                        continue
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) >= 5:
+                        try:
+                            a_idx = int(parts[0]) - 1
+                            b_idx = int(parts[1]) - 1
+                            if 0 <= a_idx < len(chunk) and 0 <= b_idx < len(chunk):
+                                all_contradictions.append({
+                                    "statement_a": chunk[a_idx],
+                                    "statement_b": chunk[b_idx],
+                                    "contradiction_type": parts[2],
+                                    "severity": parts[3],
+                                    "explanation": parts[4],
+                                    "person": person_name,
+                                })
+                        except (ValueError, IndexError):
+                            continue
+            except Exception as e:
+                if progress_cb:
+                    progress_cb(f"Batch error: {e}")
+
+        if progress_cb:
+            progress_cb(f"Found {len(all_contradictions)} contradictions for {person_name}")
+        return all_contradictions
+
+    # Small enough to process in one shot
     stmts_text = ""
     for i, s in enumerate(statements):
         stmts_text += f"{i+1}. [{s['date']}] ({s['category']}) {s['statement']} (Source: {s['source_type']} - {s['source_subject']})\n"
-
-    # If too many statements, batch them
-    if len(statements) > 80:
-        # Split by category and analyze each
-        categories = {}
-        for s in statements:
-            cat = s.get("category", "other")
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(s)
-
-        all_contradictions = []
-        for cat, cat_stmts in categories.items():
-            if len(cat_stmts) < 2:
-                continue
-            if progress_cb:
-                progress_cb(f"Checking {cat}: {len(cat_stmts)} statements...")
-            contras = find_contradictions(llm, cat_stmts, person_name, progress_cb=None)
-            all_contradictions.extend(contras)
-
-        return all_contradictions
 
     prompt = f"""Analyze these statements by {person_name} and find ALL contradictions,
 inconsistencies, and changing narratives.
