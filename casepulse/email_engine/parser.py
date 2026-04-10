@@ -47,16 +47,25 @@ def detect_forwarded_content(subject: str, body_text: str,
         r"Begin forwarded message:",
         r"From:.*\nSent:.*\nTo:.*\nSubject:",
         r"From:.*\nDate:.*\nTo:.*\nSubject:",
+        # Outlook-style: From/Sent/To/Subject on separate lines with values on next line
+        r"From:\s*\n.+\nSent:\s*\n",
+        r"From:\s*\n.+\nDate:\s*\n",
     ]
 
     for pattern in fwd_patterns:
         match = re.search(pattern, body_text, re.IGNORECASE)
         if match:
             is_forwarded = True
-            # Try to extract original sender and date from the forwarded header block
             remaining = body_text[match.start():]
             original_sender = _extract_field(remaining, "From")
             original_date = _extract_field(remaining, "Date") or _extract_field(remaining, "Sent")
+
+            # Outlook multi-line format: "From:\nName\nSent:\nDate\nTo:\nemail"
+            if not original_sender:
+                original_sender = _extract_field_multiline(remaining, "From")
+            if not original_date:
+                original_date = _extract_field_multiline(remaining, "Sent") or _extract_field_multiline(remaining, "Date")
+
             break
 
     # Also check X-Forwarded-Message-Id header
@@ -64,6 +73,35 @@ def detect_forwarded_content(subject: str, body_text: str,
         is_forwarded = True
 
     return is_forwarded, original_sender, original_date
+
+
+def _extract_field_multiline(text: str, field_name: str) -> str:
+    """Extract a field value where the value is on the NEXT line after the label.
+
+    Handles Outlook-style:
+        From:
+        Leah Simeone
+        Sent:
+        July 8, 2025 11:31 AM
+        To:
+        singh_imanisha@hotmail.com
+    """
+    pattern = rf"^{field_name}:\s*$\n(.+?)$"
+    match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+    if match:
+        value = match.group(1).strip()
+        if field_name.lower() in ("from", "to"):
+            # Try to extract email
+            email_match = re.search(r"<([^>]+)>", value)
+            if email_match:
+                return email_match.group(1).lower()
+            email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", value)
+            if email_match:
+                return email_match.group(0).lower()
+            # Just a name — return it
+            return value
+        return value
+    return ""
 
 
 def _extract_field(text: str, field_name: str) -> str:
