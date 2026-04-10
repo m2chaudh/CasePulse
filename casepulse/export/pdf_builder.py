@@ -215,19 +215,31 @@ class CasePulsePDF(FPDF):
 
 def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                        date_start: str = "", date_end: str = "",
-                       case_id: int = None) -> bytes:
-    """Build a timeline PDF from all communications."""
+                       case_id: int = None, detail_level: str = "full") -> bytes:
+    """Build a timeline PDF from all communications.
+
+    detail_level:
+        'summary' — compact table, one row per email (30-40 pages)
+        'full' — every email with body + attachments (100+ pages)
+    """
     pdf = CasePulsePDF(case_name=case_name, case_number=case_number)
+    account_map = {a["id"]: a["email"] for a in db.get_accounts()}
 
     # Cover page
+    items = db.get_unified_timeline(date_start=date_start, date_end=date_end, limit=50000)
+    email_count = sum(1 for i in items if i["type"] == "email")
+    chat_count = sum(1 for i in items if i["type"] == "chat")
+
     pdf.add_cover_page(
         title="Communication Timeline",
         subtitle=case_name,
         date_range=f"{date_start} to {date_end}",
     )
-
-    # Get unified timeline
-    items = db.get_unified_timeline(date_start=date_start, date_end=date_end, limit=50000)
+    # Add stats to cover page
+    pdf.set_font("Helvetica", "", 11)
+    pdf.ln(5)
+    pdf.cell(0, 8, f"Total items: {len(items):,} ({email_count:,} emails, {chat_count:,} chat messages)",
+             align="C", new_x="LMARGIN", new_y="NEXT")
 
     if not items:
         pdf.add_page()
@@ -237,65 +249,198 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
 
     # Get exhibit labels if case_id provided
     exhibit_map = {}
+    flag_map = {}
     if case_id:
         tags = db.get_evidence_tags_for_case(case_id)
         for t in tags:
             key = f"{t['item_type']}_{t['item_id']}"
             exhibit_map[key] = t.get("exhibit_label", "")
+            flag_map[key] = t.get("flag", "")
 
-    # Timeline table
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, "Chronological Timeline", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(3)
+    if detail_level == "summary":
+        # ── SUMMARY MODE — compact table ──
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 12, "Chronological Timeline (Summary)", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
 
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(230, 230, 230)
-    col_widths = [22, 10, 35, 60, 20, 18, 25]
-    headers = ["Date", "Type", "From", "Subject / Message", "Direction", "Flag", "Exhibit"]
-    for w, h in zip(col_widths, headers):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-
-    pdf.set_font("Helvetica", "", 6)
-    current_date = ""
-    for item in items:
-        if pdf.get_y() > 265:
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.set_fill_color(230, 230, 230)
-            for w, h in zip(col_widths, headers):
-                pdf.cell(w, 6, h, border=1, fill=True)
-            pdf.ln()
-            pdf.set_font("Helvetica", "", 6)
-
-        dt = str(item.get("timestamp", ""))[:16]
-        item_date = dt[:10]
-
-        # Date separator
-        if item_date != current_date:
-            current_date = item_date
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.set_fill_color(245, 245, 245)
-            pdf.cell(sum(col_widths), 5, current_date, border=1, fill=True, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 6)
-
-        item_type = item.get("type", "email")[:5]
-        sender = _safe(item.get("sender", ""))[:20]
-        subject = _safe(item.get("subject", "") or item.get("body_preview", ""))[:35]
-        direction = item.get("direction", "")[:5]
-        fwd = "[FWD]" if item.get("is_forwarded") else ""
-        exhibit_key = f"{item.get('type', 'email')}_{item.get('source_id', '')}"
-        exhibit = exhibit_map.get(exhibit_key, "")[:12]
-
-        pdf.cell(col_widths[0], 5, dt[11:16] if len(dt) > 11 else "", border=1)
-        pdf.cell(col_widths[1], 5, item_type, border=1)
-        pdf.cell(col_widths[2], 5, sender, border=1)
-        pdf.cell(col_widths[3], 5, subject, border=1)
-        pdf.cell(col_widths[4], 5, f"{direction} {fwd}".strip(), border=1)
-        pdf.cell(col_widths[5], 5, "", border=1)  # Flag column
-        pdf.cell(col_widths[6], 5, exhibit, border=1)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_fill_color(230, 230, 230)
+        col_widths = [22, 10, 35, 60, 20, 18, 25]
+        headers = ["Date", "Type", "From", "Subject / Message", "Direction", "Flag", "Exhibit"]
+        for w, h in zip(col_widths, headers):
+            pdf.cell(w, 6, h, border=1, fill=True)
         pdf.ln()
+
+        pdf.set_font("Helvetica", "", 6)
+        current_date = ""
+        for item in items:
+            if pdf.get_y() > 265:
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 7)
+                pdf.set_fill_color(230, 230, 230)
+                for w, h in zip(col_widths, headers):
+                    pdf.cell(w, 6, h, border=1, fill=True)
+                pdf.ln()
+                pdf.set_font("Helvetica", "", 6)
+
+            dt = str(item.get("timestamp", ""))[:16]
+            item_date = dt[:10]
+
+            if item_date != current_date:
+                current_date = item_date
+                pdf.set_font("Helvetica", "B", 7)
+                pdf.set_fill_color(245, 245, 245)
+                pdf.cell(sum(col_widths), 5, current_date, border=1, fill=True, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("Helvetica", "", 6)
+
+            item_type = item.get("type", "email")[:5]
+            sender = _safe(item.get("sender", ""))[:20]
+            subject = _safe(item.get("subject", "") or item.get("body_preview", ""))[:35]
+            direction = item.get("direction", "")[:5]
+            fwd = "[FWD]" if item.get("is_forwarded") else ""
+            exhibit_key = f"{item.get('type', 'email')}_{item.get('source_id', '')}"
+            exhibit = exhibit_map.get(exhibit_key, "")[:12]
+            flag = flag_map.get(exhibit_key, "")[:8]
+
+            pdf.cell(col_widths[0], 5, dt[11:16] if len(dt) > 11 else "", border=1)
+            pdf.cell(col_widths[1], 5, item_type, border=1)
+            pdf.cell(col_widths[2], 5, sender, border=1)
+            pdf.cell(col_widths[3], 5, subject, border=1)
+            pdf.cell(col_widths[4], 5, f"{direction} {fwd}".strip(), border=1)
+            pdf.cell(col_widths[5], 5, flag, border=1)
+            pdf.cell(col_widths[6], 5, exhibit, border=1)
+            pdf.ln()
+
+    else:
+        # ── FULL MODE — every email with body and attachments ──
+        current_date = ""
+        email_num = 0
+
+        for item in items:
+            dt = str(item.get("timestamp", ""))[:16]
+            item_date = dt[:10]
+
+            # Date header
+            if item_date and item_date != current_date:
+                current_date = item_date
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 14)
+                pdf.set_fill_color(220, 230, 245)
+                try:
+                    from datetime import datetime as _dt
+                    date_label = _dt.strptime(item_date, "%Y-%m-%d").strftime("%A, %B %d, %Y")
+                except ValueError:
+                    date_label = item_date
+                pdf.cell(0, 10, date_label, fill=True, new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(3)
+
+            if item["type"] == "email":
+                email_num += 1
+                email_data = db.get_email_by_id(item["source_id"])
+                if not email_data:
+                    continue
+
+                exhibit_key = f"email_{item['source_id']}"
+                exhibit = exhibit_map.get(exhibit_key, "")
+                flag = flag_map.get(exhibit_key, "")
+
+                # Check if we need a new page
+                if pdf.get_y() > 230:
+                    pdf.add_page()
+
+                # Email header block
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.set_fill_color(240, 240, 240)
+
+                header_text = f"[{email_num}] {dt}"
+                if exhibit:
+                    header_text += f"  |  {exhibit}"
+                if flag and flag != "none":
+                    header_text += f"  |  {flag.upper()}"
+
+                pdf.cell(0, 7, header_text, fill=True, border=1, new_x="LMARGIN", new_y="NEXT")
+
+                # Metadata
+                pdf.set_font("Helvetica", "", 8)
+                sender_name = email_data.get("sender_name", "")
+                sender_email = email_data.get("sender_email", "")
+                subject = email_data.get("subject", "")
+                direction = email_data.get("direction", "")
+                mailbox = account_map.get(email_data.get("account_id"), "")
+
+                pdf.cell(0, 5, _safe(f"From: {sender_name} <{sender_email}>  |  Direction: {direction}  |  Mailbox: {mailbox}"),
+                         new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(0, 5, _safe(f"Subject: {subject}"),
+                         new_x="LMARGIN", new_y="NEXT")
+
+                # Recipients
+                import json as _json
+                recips = email_data.get("recipients", "")
+                if recips:
+                    try:
+                        rlist = _json.loads(recips) if isinstance(recips, str) else recips
+                        if isinstance(rlist, list):
+                            to_str = ", ".join(r.get("email", str(r)) if isinstance(r, dict) else str(r) for r in rlist)
+                            pdf.cell(0, 5, _safe(f"To: {to_str}"), new_x="LMARGIN", new_y="NEXT")
+                    except Exception:
+                        pass
+
+                if email_data.get("is_forwarded") and email_data.get("original_sender"):
+                    pdf.set_font("Helvetica", "I", 8)
+                    pdf.cell(0, 5,
+                             _safe(f"Originally from: {email_data['original_sender']} ({email_data.get('original_date', '')})"),
+                             new_x="LMARGIN", new_y="NEXT")
+
+                pdf.ln(2)
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                pdf.ln(2)
+
+                # Body
+                body = email_data.get("body_text", "") or ""
+                if body:
+                    pdf.set_font("Helvetica", "", 8)
+                    pdf.multi_cell(0, 4, _safe(body[:5000]))
+                    if len(body) > 5000:
+                        pdf.set_font("Helvetica", "I", 7)
+                        pdf.cell(0, 4, f"[... body truncated at 5,000 of {len(body):,} characters ...]",
+                                 new_x="LMARGIN", new_y="NEXT")
+
+                # Attachments
+                attachments = db.get_attachments_for_email(item["source_id"])
+                if attachments:
+                    pdf.ln(2)
+                    pdf.set_font("Helvetica", "B", 8)
+                    pdf.cell(0, 5, f"Attachments ({len(attachments)}):", new_x="LMARGIN", new_y="NEXT")
+                    pdf.set_font("Helvetica", "", 7)
+                    for att in attachments:
+                        dup = " (duplicate)" if att.get("is_duplicate") else ""
+                        size_kb = (att.get("size_bytes", 0) or 0) // 1024
+                        pdf.cell(0, 4, _safe(f"  - {att['filename']} ({size_kb} KB){dup}"),
+                                 new_x="LMARGIN", new_y="NEXT")
+                        # Include extracted text preview
+                        if att.get("extracted_text"):
+                            pdf.set_font("Helvetica", "I", 7)
+                            pdf.multi_cell(0, 3.5, _safe(att["extracted_text"][:1000]))
+                            if len(att["extracted_text"]) > 1000:
+                                pdf.cell(0, 3.5, "[... attachment text truncated ...]",
+                                         new_x="LMARGIN", new_y="NEXT")
+                            pdf.set_font("Helvetica", "", 7)
+
+                pdf.ln(3)
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                pdf.ln(3)
+
+            elif item["type"] == "chat":
+                # Chat messages — compact inline
+                if pdf.get_y() > 270:
+                    pdf.add_page()
+                sender = _safe(item.get("sender", ""))
+                msg = _safe(item.get("body_preview", ""))[:200]
+                pdf.set_font("Helvetica", "", 7)
+                time_str = dt[11:16] if len(dt) > 11 else ""
+                pdf.cell(0, 4, f"[{time_str}] CHAT | {sender}: {msg}",
+                         new_x="LMARGIN", new_y="NEXT")
 
     return pdf.output()
 

@@ -26,7 +26,8 @@ preset = st.selectbox(
     [
         "AI Analysis Package (for Claude/Gemini)",
         "For My Lawyer (PDF + Notes)",
-        "Timeline (PDF)",
+        "Timeline — Full Detail (PDF)",
+        "Timeline — Summary/Index (PDF)",
         "Timeline (Excel)",
         "Timeline (CSV)",
         "Exhibit Bundle (PDF)",
@@ -204,15 +205,25 @@ if st.button("Generate Export", type="primary"):
                 db.log_action("export", f"Lawyer package: {items_count} items")
                 st.stop()
 
-            elif preset == "Timeline (PDF)":
-                st.write("Building PDF timeline...")
+            elif "Timeline" in preset and "PDF" in preset:
                 from casepulse.export.pdf_builder import build_timeline_pdf
+
+                if "Full" in preset:
+                    st.write("Building full detail timeline PDF (every email with body + attachments)...")
+                    detail = "full"
+                    label = "Full_Detail"
+                else:
+                    st.write("Building summary/index timeline PDF (compact table)...")
+                    detail = "summary"
+                    label = "Summary_Index"
+
                 data = build_timeline_pdf(
                     db, case_name=case_name, case_number=case_number,
                     date_start=str(export_start), date_end=str(export_end),
                     case_id=selected_case_id,
+                    detail_level=detail,
                 )
-                filename = f"CasePulse_Timeline_{export_start}_{export_end}.pdf"
+                filename = f"CasePulse_Timeline_{label}_{export_start}_{export_end}.pdf"
                 mime = "application/pdf"
                 fmt = "pdf"
                 items = db.get_unified_timeline(str(export_start), str(export_end), limit=50000)
