@@ -15,7 +15,7 @@ from casepulse.config import get_data_dir
 # Read-only access to Gmail
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-REDIRECT_PORT = 8401
+REDIRECT_PORT = 0  # Auto-pick a free port — avoids "Address already in use" errors
 
 
 class GoogleAuth:
