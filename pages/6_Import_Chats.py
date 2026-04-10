@@ -167,6 +167,9 @@ with tab4:
     )
 
     if cv_path and st.button("Import ChatVault"):
+        # Clean up path — handle URL encoding and whitespace
+        from urllib.parse import unquote
+        cv_path = unquote(cv_path.strip()).replace("file://", "")
         if not Path(cv_path).exists():
             st.error(f"File not found: {cv_path}")
         else:
