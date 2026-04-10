@@ -217,7 +217,7 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                        date_start: str = "", date_end: str = "",
                        case_id: int = None, detail_level: str = "full",
                        attachments_folder: str = "attachments",
-                       body_cap: int = 0) -> bytes:
+                       body_cap: int = 0, include_chats: bool = True) -> bytes:
     """Build a timeline PDF from all communications.
 
     detail_level:
@@ -229,6 +229,8 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
 
     # Cover page
     items = db.get_unified_timeline(date_start=date_start, date_end=date_end, limit=50000)
+    if not include_chats:
+        items = [i for i in items if i["type"] != "chat"]
     email_count = sum(1 for i in items if i["type"] == "email")
     chat_count = sum(1 for i in items if i["type"] == "chat")
 

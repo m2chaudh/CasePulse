@@ -234,6 +234,7 @@ if st.button("Generate Export", type="primary"):
                     detail_level=detail,
                     attachments_folder="attachments",
                     body_cap=body_cap,
+                    include_chats=include_chats,
                 )
                 filename = f"CasePulse_Timeline_{label}_{export_start}_{export_end}.pdf"
                 mime = "application/pdf"
