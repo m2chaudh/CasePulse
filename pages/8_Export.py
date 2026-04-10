@@ -207,6 +207,7 @@ if st.button("Generate Export", type="primary"):
 
             elif "Timeline" in preset and "PDF" in preset:
                 from casepulse.export.pdf_builder import build_timeline_pdf
+                import shutil
 
                 if "Full" in preset:
                     st.write("Building full detail timeline PDF (every email with body + attachments)...")
@@ -222,12 +223,44 @@ if st.button("Generate Export", type="primary"):
                     date_start=str(export_start), date_end=str(export_end),
                     case_id=selected_case_id,
                     detail_level=detail,
+                    attachments_folder="attachments",
                 )
                 filename = f"CasePulse_Timeline_{label}_{export_start}_{export_end}.pdf"
                 mime = "application/pdf"
                 fmt = "pdf"
                 items = db.get_unified_timeline(str(export_start), str(export_end), limit=50000)
                 items_count = len(items)
+
+                # For full detail, also save to Desktop with attachments folder
+                if detail == "full":
+                    from pathlib import Path as _P
+                    out_dir = _P.home() / "Desktop" / f"CasePulse_Timeline_{label}"
+                    out_dir.mkdir(exist_ok=True)
+                    att_dir = out_dir / "attachments"
+                    att_dir.mkdir(exist_ok=True)
+
+                    # Save PDF
+                    (out_dir / filename).write_bytes(data)
+
+                    # Copy all attachments
+                    from casepulse.config import get_data_dir
+                    src_att = get_data_dir() / "attachments"
+                    att_copied = 0
+                    if src_att.exists():
+                        for folder in src_att.iterdir():
+                            if folder.is_dir():
+                                for f in folder.iterdir():
+                                    if f.is_file():
+                                        dst = att_dir / f.name
+                                        if not dst.exists():
+                                            try:
+                                                shutil.copy2(str(f), str(dst))
+                                                att_copied += 1
+                                            except Exception:
+                                                pass
+
+                    st.write(f"Saved to Desktop: `{out_dir}`")
+                    st.write(f"PDF + {att_copied} attachment files. Attachments are hyperlinked in the PDF.")
 
             elif preset == "Timeline (Excel)":
                 st.write("Building Excel timeline...")

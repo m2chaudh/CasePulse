@@ -215,7 +215,8 @@ class CasePulsePDF(FPDF):
 
 def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                        date_start: str = "", date_end: str = "",
-                       case_id: int = None, detail_level: str = "full") -> bytes:
+                       case_id: int = None, detail_level: str = "full",
+                       attachments_folder: str = "attachments") -> bytes:
     """Build a timeline PDF from all communications.
 
     detail_level:
@@ -412,12 +413,20 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                     pdf.ln(2)
                     pdf.set_font("Helvetica", "B", 8)
                     pdf.cell(0, 5, f"Attachments ({len(attachments)}):", new_x="LMARGIN", new_y="NEXT")
-                    pdf.set_font("Helvetica", "", 7)
                     for att in attachments:
                         dup = " (duplicate)" if att.get("is_duplicate") else ""
                         size_kb = (att.get("size_bytes", 0) or 0) // 1024
-                        pdf.cell(0, 4, _safe(f"  - {att['filename']} ({size_kb} KB){dup}"),
-                                 new_x="LMARGIN", new_y="NEXT")
+                        fname = att["filename"]
+
+                        # Hyperlink to attachment file (relative path)
+                        link_path = f"{attachments_folder}/{fname}"
+                        pdf.set_font("Helvetica", "U", 7)
+                        pdf.set_text_color(0, 80, 180)
+                        pdf.cell(0, 4, _safe(f"  {fname} ({size_kb} KB){dup}"),
+                                 new_x="LMARGIN", new_y="NEXT", link=link_path)
+                        pdf.set_text_color(0, 0, 0)
+                        pdf.set_font("Helvetica", "", 7)
+
                         # Include extracted text preview
                         if att.get("extracted_text"):
                             pdf.set_font("Helvetica", "I", 7)
