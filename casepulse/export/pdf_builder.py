@@ -216,7 +216,8 @@ class CasePulsePDF(FPDF):
 def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                        date_start: str = "", date_end: str = "",
                        case_id: int = None, detail_level: str = "full",
-                       attachments_folder: str = "attachments") -> bytes:
+                       attachments_folder: str = "attachments",
+                       body_cap: int = 0) -> bytes:
     """Build a timeline PDF from all communications.
 
     detail_level:
@@ -419,11 +420,12 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                 # Body
                 body = email_data.get("body_text", "") or ""
                 if body:
+                    max_body = body_cap if body_cap > 0 else 5000
                     pdf.set_font("Helvetica", "", 8)
-                    pdf.multi_cell(0, 4, _safe(body[:5000]))
-                    if len(body) > 5000:
+                    pdf.multi_cell(0, 4, _safe(body[:max_body]))
+                    if len(body) > max_body:
                         pdf.set_font("Helvetica", "I", 7)
-                        pdf.cell(0, 4, f"[... body truncated at 5,000 of {len(body):,} characters ...]",
+                        pdf.cell(0, 4, f"[... body truncated at {max_body:,} of {len(body):,} characters ...]",
                                  new_x="LMARGIN", new_y="NEXT")
 
                 # Attachments

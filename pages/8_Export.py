@@ -27,6 +27,7 @@ preset = st.selectbox(
         "AI Analysis Package (for Claude/Gemini)",
         "For My Lawyer (PDF + Notes)",
         "Timeline — Full Detail (PDF)",
+        "Timeline — Court Ready (PDF, trimmed bodies)",
         "Timeline — Summary/Index (PDF)",
         "Timeline (Excel)",
         "Timeline (CSV)",
@@ -211,13 +212,20 @@ if st.button("Generate Export", type="primary"):
                 import shutil
 
                 if "Full" in preset:
-                    st.write("Building full detail timeline PDF (every email with body + attachments)...")
+                    st.write("Building full detail timeline PDF (every email with full body + attachments)...")
                     detail = "full"
                     label = "Full_Detail"
+                    body_cap = 0  # No cap
+                elif "Court" in preset:
+                    st.write("Building court-ready timeline PDF (trimmed bodies, ~500-800 pages)...")
+                    detail = "full"
+                    label = "Court_Ready"
+                    body_cap = 800  # Cap bodies at 800 chars — keeps key content, cuts signatures/chains
                 else:
                     st.write("Building summary/index timeline PDF (compact table)...")
                     detail = "summary"
                     label = "Summary_Index"
+                    body_cap = 0
 
                 data = build_timeline_pdf(
                     db, case_name=case_name, case_number=case_number,
@@ -225,6 +233,7 @@ if st.button("Generate Export", type="primary"):
                     case_id=selected_case_id,
                     detail_level=detail,
                     attachments_folder="attachments",
+                    body_cap=body_cap,
                 )
                 filename = f"CasePulse_Timeline_{label}_{export_start}_{export_end}.pdf"
                 mime = "application/pdf"
