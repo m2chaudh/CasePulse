@@ -325,6 +325,18 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
             # Date header
             if item_date and item_date != current_date:
                 current_date = item_date
+                current_month_str = item_date[:7]
+
+                # Month bookmark (level 0) — shows in PDF sidebar
+                if not hasattr(pdf, '_last_month') or pdf._last_month != current_month_str:
+                    pdf._last_month = current_month_str
+                    try:
+                        from datetime import datetime as _dt
+                        month_bookmark = _dt.strptime(current_month_str, "%Y-%m").strftime("%B %Y")
+                    except ValueError:
+                        month_bookmark = current_month_str
+                    pdf.start_section(month_bookmark, level=0)
+
                 pdf.add_page()
                 pdf.set_font("Helvetica", "B", 14)
                 pdf.set_fill_color(220, 230, 245)
@@ -333,6 +345,9 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                     date_label = _dt.strptime(item_date, "%Y-%m-%d").strftime("%A, %B %d, %Y")
                 except ValueError:
                     date_label = item_date
+
+                # Day bookmark (level 1)
+                pdf.start_section(date_label, level=1)
                 pdf.cell(0, 10, date_label, fill=True, new_x="LMARGIN", new_y="NEXT")
                 pdf.ln(3)
 
@@ -350,6 +365,13 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
                 if pdf.get_y() > 230:
                     pdf.add_page()
 
+                # Email bookmark (level 2) — sender + subject in sidebar
+                sender_name = email_data.get("sender_name", "")
+                sender_email_addr = email_data.get("sender_email", "")
+                subject = email_data.get("subject", "(no subject)")
+                bookmark_label = f"[{email_num}] {sender_name or sender_email_addr}: {subject[:50]}"
+                pdf.start_section(bookmark_label, level=2)
+
                 # Email header block
                 pdf.set_font("Helvetica", "B", 9)
                 pdf.set_fill_color(240, 240, 240)
@@ -364,13 +386,10 @@ def build_timeline_pdf(db: Database, case_name: str = "", case_number: str = "",
 
                 # Metadata
                 pdf.set_font("Helvetica", "", 8)
-                sender_name = email_data.get("sender_name", "")
-                sender_email = email_data.get("sender_email", "")
-                subject = email_data.get("subject", "")
                 direction = email_data.get("direction", "")
                 mailbox = account_map.get(email_data.get("account_id"), "")
 
-                pdf.cell(0, 5, _safe(f"From: {sender_name} <{sender_email}>  |  Direction: {direction}  |  Mailbox: {mailbox}"),
+                pdf.cell(0, 5, _safe(f"From: {sender_name} <{sender_email_addr}>  |  Direction: {direction}  |  Mailbox: {mailbox}"),
                          new_x="LMARGIN", new_y="NEXT")
                 pdf.cell(0, 5, _safe(f"Subject: {subject}"),
                          new_x="LMARGIN", new_y="NEXT")
