@@ -214,10 +214,17 @@ class MicrosoftFetcher:
             })
 
         # Filter by sender if specified
+        # Exclude the user's own account emails from the match — otherwise
+        # every email matches because the user is always a sender or recipient
         if sender_emails:
-            sender_set = set(e.lower() for e in sender_emails)
+            own_emails = set()
+            for acc in self.db.get_accounts():
+                own_emails.add(acc["email"].lower())
+
+            sender_set = set(e.lower() for e in sender_emails) - own_emails
             all_addrs = [sender_email] + [r["email"] for r in recipients] + [r["email"] for r in cc]
-            if not any(addr.lower() in sender_set for addr in all_addrs):
+            other_addrs = [a.lower() for a in all_addrs if a.lower() not in own_emails]
+            if not any(addr in sender_set for addr in other_addrs):
                 return "filtered"
 
         # Extract body

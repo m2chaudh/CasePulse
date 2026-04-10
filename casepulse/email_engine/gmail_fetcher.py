@@ -185,9 +185,19 @@ class GmailFetcher:
             all_msg_ids = set()  # Use set to deduplicate across batches
 
             if sender_emails:
+                # Exclude user's own email addresses — otherwise every email matches
+                own_emails = set()
+                for acc in self.db.get_accounts():
+                    own_emails.add(acc["email"].lower())
+                filtered_senders = [e for e in sender_emails if e.lower() not in own_emails]
+
+                if not filtered_senders:
+                    # All selected senders are the user's own accounts — fetch nothing
+                    filtered_senders = []
+
                 SENDER_BATCH = 10
-                for batch_start in range(0, len(sender_emails), SENDER_BATCH):
-                    batch = sender_emails[batch_start:batch_start + SENDER_BATCH]
+                for batch_start in range(0, len(filtered_senders), SENDER_BATCH):
+                    batch = filtered_senders[batch_start:batch_start + SENDER_BATCH]
                     addr_queries = []
                     for addr in batch:
                         addr_queries.append(f"from:{addr}")
@@ -216,8 +226,8 @@ class GmailFetcher:
 
                     if progress_cb:
                         progress_cb(
-                            f"Scanning senders {batch_start + 1}-{min(batch_start + SENDER_BATCH, len(sender_emails))}"
-                            f"/{len(sender_emails)}... {len(all_msg_ids)} emails found so far"
+                            f"Scanning senders {batch_start + 1}-{min(batch_start + SENDER_BATCH, len(filtered_senders))}"
+                            f"/{len(filtered_senders)}... {len(all_msg_ids)} emails found so far"
                         )
             else:
                 # No sender filter — fetch all emails in date range
