@@ -166,8 +166,118 @@ Categories: access, custody, financial, incident, promise, legal, communication,
             if progress_cb:
                 progress_cb(f"Chat batch error: {e}")
 
+    # Also extract from email attachments (PDFs, Word docs)
     if progress_cb:
-        progress_cb(f"Done: {len(statements)} statements extracted from {sender_name or sender_email}")
+        progress_cb(f"Scanning attachments from {sender_name or sender_email}...")
+
+    import sqlite3 as _sql
+    _att_conn = _sql.connect(str(db.db_path))
+    _att_conn.row_factory = _sql.Row
+    att_rows = _att_conn.execute("""
+        SELECT a.id, a.filename, a.extracted_text, a.email_id, e.date_received, e.subject
+        FROM attachments a
+        JOIN emails e ON a.email_id = e.id
+        WHERE e.sender_email = ? AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
+        ORDER BY e.date_received
+    """, (sender_email,)).fetchall()
+    _att_conn.close()
+
+    if att_rows:
+        if progress_cb:
+            progress_cb(f"Found {len(att_rows)} attachments with text from {sender_name or sender_email}")
+
+        for att in att_rows:
+            text = att["extracted_text"][:2000]
+            if len(text) < 50:
+                continue
+
+            date_str = (att["date_received"] or "")[:10]
+            prompt = f"""Extract factual claims and allegations from this document attached to an email
+from {sender_name or sender_email} dated {date_str}.
+
+Document: {att['filename']}
+Content:
+{text}
+
+Format: DATE | STATEMENT | CATEGORY
+Categories: access, custody, financial, incident, promise, legal, allegation, other"""
+
+            try:
+                response = llm.query(
+                    system_prompt="You extract factual claims from legal documents. Focus on allegations, dates, and specific claims.",
+                    user_prompt=prompt,
+                )
+
+                for line in response.strip().split("\n"):
+                    line = line.strip()
+                    if "|" not in line:
+                        continue
+                    parts = line.split("|")
+                    if len(parts) >= 2 and len(parts[1].strip()) > 10:
+                        statements.append({
+                            "date": parts[0].strip(),
+                            "statement": parts[1].strip(),
+                            "category": parts[2].strip().lower() if len(parts) > 2 else "allegation",
+                            "sender": sender_email,
+                            "sender_name": sender_name,
+                            "source_type": "attachment",
+                            "source_id": att["email_id"],
+                            "source_subject": f"Attachment: {att['filename']} (from: {att['subject']})",
+                        })
+
+            except Exception as e:
+                if progress_cb:
+                    progress_cb(f"Attachment error ({att['filename']}): {e}")
+
+    # Also extract from imported documents
+    docs = db.get_documents(ocr_status="done")
+    if docs:
+        if progress_cb:
+            progress_cb(f"Scanning {len(docs)} imported documents...")
+
+        for doc in docs:
+            text = doc.get("extracted_text", "")[:2000]
+            if len(text) < 50:
+                continue
+
+            prompt = f"""Extract factual claims, allegations, and key statements from this document.
+
+Document: {doc['filename']}
+Content:
+{text}
+
+Format: DATE | STATEMENT | CATEGORY
+Categories: access, custody, financial, incident, promise, legal, allegation, police_report, court_order, other"""
+
+            try:
+                response = llm.query(
+                    system_prompt="You extract factual claims from legal documents. Focus on allegations, police findings, court orders, and specific claims with dates.",
+                    user_prompt=prompt,
+                )
+
+                for line in response.strip().split("\n"):
+                    line = line.strip()
+                    if "|" not in line:
+                        continue
+                    parts = line.split("|")
+                    if len(parts) >= 2 and len(parts[1].strip()) > 10:
+                        statements.append({
+                            "date": parts[0].strip(),
+                            "statement": parts[1].strip(),
+                            "category": parts[2].strip().lower() if len(parts) > 2 else "other",
+                            "sender": "document",
+                            "sender_name": doc["filename"],
+                            "source_type": "document",
+                            "source_id": doc["id"],
+                            "source_subject": f"Document: {doc['filename']}",
+                        })
+
+            except Exception as e:
+                if progress_cb:
+                    progress_cb(f"Document error ({doc['filename']}): {e}")
+
+    if progress_cb:
+        progress_cb(f"Done: {len(statements)} statements extracted from {sender_name or sender_email} (emails + chats + attachments + documents)")
 
     return statements
 
@@ -377,12 +487,73 @@ def run_full_analysis(db: Database, llm: LLMProvider,
     total_contras = sum(len(c) for c in all_contradictions.values())
     total_cross = sum(len(c) for c in all_cross_source.values())
 
+    # Pass 4: Cross-reference attachments vs statements
+    # Compare what's in documents (affidavits, police reports) against email/chat statements
+    doc_stmts = []
+    for stmts in all_statements.values():
+        doc_stmts.extend([s for s in stmts if s["source_type"] in ("attachment", "document")])
+
+    non_doc_stmts = []
+    for stmts in all_statements.values():
+        non_doc_stmts.extend([s for s in stmts if s["source_type"] in ("email", "chat")])
+
+    doc_vs_communication = []
+    if doc_stmts and non_doc_stmts and progress_cb:
+        progress_cb("Pass 4: Comparing document claims against email/chat evidence...")
+        doc_text = "\n".join(f"- [{s['date']}] [{s['source_subject']}] {s['statement']}" for s in doc_stmts[:60])
+        comm_text = "\n".join(f"- [{s['date']}] [{s['source_type']}] {s['statement']}" for s in non_doc_stmts[:60])
+
+        prompt = f"""Compare claims made in legal DOCUMENTS (affidavits, police reports, court filings)
+against what was actually said in EMAILS and CHAT messages.
+
+Find where a document makes a claim that is contradicted by the actual email/chat evidence.
+This is critical for defense — it shows where formal allegations don't match the real communication record.
+
+DOCUMENT CLAIMS (from affidavits, police reports, court orders):
+{doc_text}
+
+ACTUAL EMAIL/CHAT EVIDENCE:
+{comm_text}
+
+For each contradiction, output:
+DOCUMENT_CLAIM | ACTUAL_EVIDENCE | TYPE | SEVERITY | DEFENSE_VALUE
+
+Types: allegation_vs_evidence, date_mismatch, event_not_supported, exaggeration, omission
+Severity: high, medium, low
+Defense_value: brief note on why this helps the defense"""
+
+        try:
+            response = llm.query(
+                system_prompt="You are a criminal defense analyst comparing formal allegations against actual communication evidence. Focus on where allegations are unsupported or contradicted by real evidence.",
+                user_prompt=prompt,
+            )
+
+            for line in response.strip().split("\n"):
+                line = line.strip()
+                if "|" not in line:
+                    continue
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) >= 5:
+                    doc_vs_communication.append({
+                        "document_claim": parts[0],
+                        "actual_evidence": parts[1],
+                        "type": parts[2],
+                        "severity": parts[3],
+                        "defense_value": parts[4],
+                    })
+
+        except Exception as e:
+            if progress_cb:
+                progress_cb(f"Document vs communication error: {e}")
+
     return {
         "statements": all_statements,
         "contradictions": all_contradictions,
         "cross_source": all_cross_source,
+        "doc_vs_communication": doc_vs_communication,
         "total_statements": total_stmts,
         "total_contradictions": total_contras,
         "total_cross_source": total_cross,
+        "total_doc_conflicts": len(doc_vs_communication),
         "analyzed_contacts": len(target_senders),
     }

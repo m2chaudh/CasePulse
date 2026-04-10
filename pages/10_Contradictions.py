@@ -118,7 +118,8 @@ if st.button("Run Contradiction Analysis", type="primary", disabled=not selected
     progress.success(
         f"Analysis complete: {results['total_statements']} statements, "
         f"{results['total_contradictions']} contradictions, "
-        f"{results['total_cross_source']} cross-source conflicts"
+        f"{results['total_cross_source']} cross-source conflicts, "
+        f"{results.get('total_doc_conflicts', 0)} document vs evidence conflicts"
     )
 
 # ══════════════════════════════════════════════════════
@@ -130,18 +131,20 @@ if "contra_results" in st.session_state:
     st.divider()
 
     # Summary
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Statements Found", results["total_statements"])
+        st.metric("Statements", results["total_statements"])
     with col2:
         st.metric("Contradictions", results["total_contradictions"])
     with col3:
-        st.metric("Cross-Source Conflicts", results["total_cross_source"])
+        st.metric("Cross-Source", results["total_cross_source"])
     with col4:
-        st.metric("Contacts Analyzed", results["analyzed_contacts"])
+        st.metric("Doc vs Evidence", results.get("total_doc_conflicts", 0))
+    with col5:
+        st.metric("Contacts", results["analyzed_contacts"])
 
-    tab_contras, tab_cross, tab_stmts, tab_export = st.tabs([
-        "Contradictions", "Email vs Chat", "All Statements", "Export Report"
+    tab_contras, tab_docs, tab_cross, tab_stmts, tab_export = st.tabs([
+        "Contradictions", "Documents vs Evidence", "Email vs Chat", "All Statements", "Export Report"
     ])
 
     # ── Tab 1: Contradictions ──
@@ -185,7 +188,44 @@ if "contra_results" in st.session_state:
         if not any(results["contradictions"].values()):
             st.info("No contradictions found. This could mean statements are consistent, or try analyzing more contacts.")
 
-    # ── Tab 2: Cross-Source ──
+    # ── Tab 2: Documents vs Evidence ──
+    with tab_docs:
+        st.markdown("### Document Claims vs Actual Evidence")
+        st.markdown(
+            "Where allegations in **affidavits, police reports, and court filings** "
+            "are contradicted or unsupported by the **actual email and chat evidence**."
+        )
+
+        doc_conflicts = results.get("doc_vs_communication", [])
+        if doc_conflicts:
+            # Sort by severity
+            severity_order = {"high": 0, "medium": 1, "low": 2}
+            doc_conflicts.sort(key=lambda x: severity_order.get(x.get("severity", "low"), 3))
+
+            for i, c in enumerate(doc_conflicts):
+                severity = c.get("severity", "?")
+
+                st.markdown(f"**{i+1}. [{severity.upper()}] {c.get('type', '')}**")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**What the document claims:**")
+                    st.error(c.get("document_claim", ""))
+                with col2:
+                    st.markdown("**What the actual evidence shows:**")
+                    st.success(c.get("actual_evidence", ""))
+
+                st.markdown(f"**Defense value:** {c.get('defense_value', '')}")
+                st.markdown("---")
+        else:
+            st.info(
+                "No document vs evidence conflicts found. To use this feature:\n"
+                "1. Import documents (affidavits, police reports) via the **Documents** page\n"
+                "2. Make sure text is extracted (PDFs processed)\n"
+                "3. Re-run the analysis"
+            )
+
+    # ── Tab 3: Cross-Source ──
     with tab_cross:
         st.markdown("### Email vs Chat Contradictions")
         st.markdown("Things said in formal emails that contradict informal chat messages.")
