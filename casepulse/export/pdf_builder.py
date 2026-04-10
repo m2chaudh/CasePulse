@@ -596,22 +596,45 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
 
 
 def _safe(text: str) -> str:
-    """Make text safe for PDF rendering — handle Unicode gracefully."""
+    """Make text safe for PDF rendering — preserve meaning of common Unicode chars."""
     if not text:
         return ""
-    # Replace characters that fpdf2 can't render in default font
-    # Keep common accented chars, replace emoji and CJK
-    import unicodedata
+    # Map common Unicode chars to their ASCII equivalents
+    replacements = {
+        "\u2019": "'",   # Right single quote → '
+        "\u2018": "'",   # Left single quote → '
+        "\u201c": '"',   # Left double quote → "
+        "\u201d": '"',   # Right double quote → "
+        "\u2013": "-",   # En dash → -
+        "\u2014": "--",  # Em dash → --
+        "\u2026": "...", # Ellipsis → ...
+        "\u2022": "-",   # Bullet → -
+        "\u00a0": " ",   # Non-breaking space → space
+        "\u200c": "",    # Zero-width non-joiner → remove
+        "\u200b": "",    # Zero-width space → remove
+        "\u00b7": "-",   # Middle dot → -
+        "\u2010": "-",   # Hyphen → -
+        "\u2011": "-",   # Non-breaking hyphen → -
+        "\u2012": "-",   # Figure dash → -
+        "\ufeff": "",    # BOM → remove
+        "\u00ab": '"',   # Left guillemet → "
+        "\u00bb": '"',   # Right guillemet → "
+        "\u2032": "'",   # Prime → '
+        "\u2033": '"',   # Double prime → "
+    }
     result = []
     for ch in text:
-        try:
-            ch.encode("latin-1")
-            result.append(ch)
-        except UnicodeEncodeError:
-            # Try to decompose accented characters
-            decomposed = unicodedata.normalize("NFD", ch)
-            ascii_ch = decomposed.encode("ascii", errors="ignore").decode("ascii")
-            result.append(ascii_ch if ascii_ch else "?")
+        if ch in replacements:
+            result.append(replacements[ch])
+        else:
+            try:
+                ch.encode("latin-1")
+                result.append(ch)
+            except UnicodeEncodeError:
+                import unicodedata
+                decomposed = unicodedata.normalize("NFD", ch)
+                ascii_ch = decomposed.encode("ascii", errors="ignore").decode("ascii")
+                result.append(ascii_ch if ascii_ch else " ")
     return "".join(result)
 
 
