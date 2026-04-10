@@ -148,13 +148,16 @@ class MicrosoftFetcher:
                     for msg in messages:
                         try:
                             result = self._process_message(msg, direction, sender_emails, keywords)
-                            if result == "stored":
+                            if result == "filtered" or result == "skipped":
+                                if result == "skipped":
+                                    total_skipped += 1
+                            elif isinstance(result, int):
+                                # result is the email database ID
+                                email_db_id = result
                                 total_fetched += 1
                                 if msg.get("hasAttachments"):
-                                    att_count = self._fetch_attachments(msg["id"], total_fetched)
+                                    att_count = self._fetch_attachments(msg["id"], email_db_id)
                                     total_attachments += att_count
-                            elif result == "skipped":
-                                total_skipped += 1
                         except Exception as e:
                             errors.append(f"Error processing {msg.get('id', '?')}: {str(e)}")
 
@@ -271,7 +274,7 @@ class MicrosoftFetcher:
         )
 
         # Store email
-        self.db.insert_email(
+        email_db_id = self.db.insert_email(
             message_id=message_id,
             content_hash=content_hash,
             account_id=self.account_id,
@@ -302,7 +305,7 @@ class MicrosoftFetcher:
             if r["email"]:
                 self.db.upsert_sender(r["email"], r["name"])
 
-        return "stored"
+        return email_db_id  # Return the actual database ID
 
     def _fetch_attachments(self, message_graph_id: str, email_db_id: int) -> int:
         """Download attachments for a message. Returns count."""
