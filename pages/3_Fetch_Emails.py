@@ -221,104 +221,137 @@ if sync_history:
 # ── Cleanup Tools ──
 st.divider()
 with st.expander("Data Management"):
-    st.markdown("### Delete Emails by Account")
-    st.markdown("Remove all fetched emails from a specific account. Contacts and selections are NOT affected.")
 
-    all_accounts = db.get_accounts()
-    if all_accounts:
-        for acc in all_accounts:
-            _conn2 = _sql.connect(str(db.db_path))
-            _conn2.row_factory = _sql.Row
-            count = _conn2.execute("SELECT COUNT(*) as c FROM emails WHERE account_id = ?", (acc["id"],)).fetchone()["c"]
-            _conn2.close()
+    # ── Browse & Delete by Contact ──
+    st.markdown("### Browse & Delete Emails by Contact")
+    st.markdown("Expand any contact to see their emails. Delete individually or in bulk.")
 
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                provider = "Microsoft" if acc["provider"] == "microsoft" else "Gmail"
-                st.markdown(f"**{provider}: {acc['email']}** — {count:,} emails")
-            with col2:
-                if count > 0:
-                    if st.button(f"Delete {count:,} emails", key=f"del_emails_{acc['id']}"):
-                        st.session_state[f"confirm_del_{acc['id']}"] = True
+    _dm_conn = _sql.connect(str(db.db_path))
+    _dm_conn.row_factory = _sql.Row
+    _sender_list = _dm_conn.execute("""
+        SELECT sender_email, sender_name, COUNT(*) as cnt,
+               MIN(date_received) as first_email, MAX(date_received) as last_email
+        FROM emails GROUP BY sender_email ORDER BY cnt DESC
+    """).fetchall()
+    _dm_conn.close()
 
-            if st.session_state.get(f"confirm_del_{acc['id']}"):
-                confirm = st.checkbox(
-                    f"I confirm: delete all {count:,} emails from {acc['email']}",
-                    key=f"confirm_check_{acc['id']}",
-                )
-                if confirm:
-                    if st.button(f"Confirm Delete", key=f"confirm_btn_{acc['id']}", type="primary"):
-                        _conn3 = _sql.connect(str(db.db_path))
-                        # Delete attachments first
-                        _conn3.execute("""DELETE FROM attachments WHERE email_id IN
-                                         (SELECT id FROM emails WHERE account_id = ?)""", (acc["id"],))
-                        _conn3.execute("DELETE FROM emails WHERE account_id = ?", (acc["id"],))
-                        _conn3.execute("DELETE FROM sync_log WHERE account_id = ?", (acc["id"],))
-                        _conn3.execute("UPDATE accounts SET last_synced = NULL WHERE id = ?", (acc["id"],))
-                        _conn3.commit()
-                        _conn3.close()
-                        db.log_action("emails_deleted", f"Deleted {count} emails from {acc['email']}")
-                        st.session_state.pop(f"confirm_del_{acc['id']}", None)
-                        st.success(f"Deleted {count:,} emails from {acc['email']}")
+    if _sender_list:
+        dm_search = st.text_input("Search contacts", placeholder="Search by name or email...", key="dm_search")
+        dm_filtered = list(_sender_list)
+        if dm_search:
+            dl = dm_search.lower()
+            dm_filtered = [s for s in dm_filtered
+                           if dl in s["sender_email"].lower() or dl in (s["sender_name"] or "").lower()]
+
+        st.caption(f"{len(dm_filtered)} contacts, {sum(s['cnt'] for s in dm_filtered):,} emails")
+
+        # Bulk delete by contact selection
+        dm_bulk = st.multiselect(
+            "Select contacts to bulk delete",
+            [s["sender_email"] for s in dm_filtered[:100]],
+            format_func=lambda x: f"{x} ({next((s['cnt'] for s in dm_filtered if s['sender_email'] == x), '?')} emails)",
+            key="dm_bulk_del",
+        )
+        if dm_bulk:
+            total_bulk = sum(s["cnt"] for s in dm_filtered if s["sender_email"] in dm_bulk)
+            confirm_bulk = st.checkbox(f"Confirm: delete {total_bulk:,} emails from {len(dm_bulk)} contacts", key="dm_bulk_confirm")
+            if confirm_bulk and st.button(f"Delete {total_bulk:,} emails", type="primary", key="dm_bulk_btn"):
+                _dc = _sql.connect(str(db.db_path))
+                for addr in dm_bulk:
+                    _dc.execute("DELETE FROM attachments WHERE email_id IN (SELECT id FROM emails WHERE sender_email = ?)", (addr,))
+                    _dc.execute("DELETE FROM emails WHERE sender_email = ?", (addr,))
+                _dc.commit()
+                _dc.close()
+                db.log_action("emails_deleted_by_contact", f"Deleted {total_bulk} emails from {len(dm_bulk)} contacts")
+                st.success(f"Deleted {total_bulk:,} emails")
+                st.rerun()
+
+        st.markdown("---")
+
+        # Per-contact expandable browser
+        for sender in dm_filtered[:50]:
+            s_email = sender["sender_email"]
+            s_name = sender["sender_name"] or ""
+            s_count = sender["cnt"]
+            first = sender["first_email"][:10] if sender["first_email"] else "?"
+            last = sender["last_email"][:10] if sender["last_email"] else "?"
+
+            label = f"{s_name} ({s_email})" if s_name else s_email
+            with st.expander(f"{label} — {s_count:,} emails ({first} to {last})"):
+                # Load individual emails for this sender
+                _em_conn = _sql.connect(str(db.db_path))
+                _em_conn.row_factory = _sql.Row
+                _emails = _em_conn.execute(
+                    """SELECT id, subject, date_received, direction, has_attachments
+                       FROM emails WHERE sender_email = ?
+                       ORDER BY date_received DESC LIMIT 200""",
+                    (s_email,)
+                ).fetchall()
+                _em_conn.close()
+
+                # Delete all from this contact
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    if st.button(f"Delete all {s_count:,}", key=f"dm_del_all_{s_email}", type="secondary"):
+                        _dc2 = _sql.connect(str(db.db_path))
+                        _dc2.execute("DELETE FROM attachments WHERE email_id IN (SELECT id FROM emails WHERE sender_email = ?)", (s_email,))
+                        _dc2.execute("DELETE FROM emails WHERE sender_email = ?", (s_email,))
+                        _dc2.commit()
+                        _dc2.close()
+                        db.log_action("emails_deleted_by_contact", f"Deleted {s_count} emails from {s_email}")
                         st.rerun()
+
+                # Individual emails
+                for em in _emails:
+                    dt = em["date_received"][:16] if em["date_received"] else "?"
+                    subj = em["subject"] or "(no subject)"
+                    direction = em["direction"] or ""
+                    att = " [att]" if em["has_attachments"] else ""
+
+                    ecol1, ecol2, ecol3 = st.columns([0.5, 8, 1])
+                    with ecol1:
+                        pass
+                    with ecol2:
+                        st.caption(f"{dt} | {direction} | {subj[:80]}{att}")
+                    with ecol3:
+                        if st.button("x", key=f"dm_del_email_{em['id']}"):
+                            _dc3 = _sql.connect(str(db.db_path))
+                            _dc3.execute("DELETE FROM attachments WHERE email_id = ?", (em["id"],))
+                            _dc3.execute("DELETE FROM emails WHERE id = ?", (em["id"],))
+                            _dc3.commit()
+                            _dc3.close()
+                            st.rerun()
 
     st.divider()
 
-    st.markdown("### Delete Emails by Contact")
-    st.markdown("Remove emails from specific senders. Useful for cleaning up irrelevant contacts.")
-
-    _conn_del = _sql.connect(str(db.db_path))
-    _conn_del.row_factory = _sql.Row
-    _sender_counts = _conn_del.execute("""
-        SELECT sender_email, sender_name, COUNT(*) as cnt
-        FROM emails GROUP BY sender_email ORDER BY cnt DESC LIMIT 100
-    """).fetchall()
-    _conn_del.close()
-
-    if _sender_counts:
-        del_search = st.text_input("Search contacts to delete", placeholder="Search...", key="del_contact_search")
-        del_filtered = _sender_counts
-        if del_search:
-            dl = del_search.lower()
-            del_filtered = [s for s in _sender_counts
-                            if dl in s["sender_email"].lower() or dl in (s["sender_name"] or "").lower()]
-
-        del_options = {s["sender_email"]: f"{s['sender_name'] or ''} ({s['sender_email']}) — {s['cnt']:,} emails"
-                       for s in del_filtered[:50]}
-
-        contacts_to_delete = st.multiselect(
-            "Select contacts to delete emails from",
-            list(del_options.keys()),
-            format_func=lambda x: del_options.get(x, x),
-            key="del_contacts_select",
-        )
-
-        if contacts_to_delete:
-            total_to_delete = sum(s["cnt"] for s in del_filtered if s["sender_email"] in contacts_to_delete)
-            confirm_del_contacts = st.checkbox(
-                f"Confirm: delete {total_to_delete:,} emails from {len(contacts_to_delete)} contacts",
-                key="confirm_del_contacts",
-            )
-            if confirm_del_contacts:
-                if st.button(f"Delete {total_to_delete:,} emails", type="primary", key="del_contacts_btn"):
-                    _conn_dc = _sql.connect(str(db.db_path))
-                    deleted = 0
-                    for email_addr in contacts_to_delete:
-                        _conn_dc.execute("""DELETE FROM attachments WHERE email_id IN
-                                            (SELECT id FROM emails WHERE sender_email = ?)""", (email_addr,))
-                        cur = _conn_dc.execute("DELETE FROM emails WHERE sender_email = ?", (email_addr,))
-                        deleted += cur.rowcount
-                    _conn_dc.commit()
-                    _conn_dc.close()
-                    db.log_action("emails_deleted_by_contact",
-                                  f"Deleted {deleted} emails from {len(contacts_to_delete)} contacts: {', '.join(contacts_to_delete[:5])}")
-                    st.success(f"Deleted {deleted:,} emails from {len(contacts_to_delete)} contacts")
+    # ── Delete by Account ──
+    st.markdown("### Delete by Account")
+    all_accounts = db.get_accounts()
+    for acc in all_accounts:
+        _ac = _sql.connect(str(db.db_path))
+        count = _ac.execute("SELECT COUNT(*) as c FROM emails WHERE account_id = ?", (acc["id"],)).fetchone()[0]
+        _ac.close()
+        if count > 0:
+            provider = "Microsoft" if acc["provider"] == "microsoft" else "Gmail"
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.caption(f"{provider}: {acc['email']} — {count:,} emails")
+            with col2:
+                confirm_acc = st.checkbox(f"Delete", key=f"del_acc_confirm_{acc['id']}")
+                if confirm_acc and st.button("Confirm", key=f"del_acc_btn_{acc['id']}"):
+                    _ac2 = _sql.connect(str(db.db_path))
+                    _ac2.execute("DELETE FROM attachments WHERE email_id IN (SELECT id FROM emails WHERE account_id = ?)", (acc["id"],))
+                    _ac2.execute("DELETE FROM emails WHERE account_id = ?", (acc["id"],))
+                    _ac2.execute("UPDATE accounts SET last_synced = NULL WHERE id = ?", (acc["id"],))
+                    _ac2.commit()
+                    _ac2.close()
+                    db.log_action("emails_deleted", f"Deleted {count} emails from {acc['email']}")
                     st.rerun()
 
     st.divider()
 
+    # ── Clear All ──
     st.markdown("### Clear All Email Data")
-    st.markdown("Delete ALL fetched emails, attachments, and sync history across all accounts. Contacts and selections are preserved.")
     clear_all = st.checkbox("I want to clear all email data and start fresh", key="clear_all_emails")
     if clear_all:
         total = stats["total_emails"]
