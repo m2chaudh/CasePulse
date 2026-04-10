@@ -30,6 +30,7 @@ preset = st.selectbox(
         "Timeline — Summary/Index (PDF)",
         "Timeline (Excel)",
         "Timeline (CSV)",
+        "Chat Timeline (HTML with images)",
         "Exhibit Bundle (PDF)",
         "Full Data (JSON)",
         "Full Data (Markdown)",
@@ -289,6 +290,45 @@ if st.button("Generate Export", type="primary"):
                 fmt = "csv"
                 items = db.get_unified_timeline(str(export_start), str(export_end), limit=50000)
                 items_count = len(items)
+
+            elif "Chat Timeline" in preset:
+                st.write("Building chat timeline HTML with inline images...")
+                from casepulse.export.chat_timeline_html import build_chat_timeline_html
+                from pathlib import Path as _P
+
+                chat_out = str(_P.home() / "Desktop" / "CasePulse_Chat_Timeline")
+                result = build_chat_timeline_html(
+                    db, output_dir=chat_out,
+                    case_name=case_name,
+                    date_start=str(export_start), date_end=str(export_end),
+                    include_images=True,
+                    progress_cb=lambda msg: st.write(msg),
+                )
+
+                status.update(label=f"Chat timeline ready — {result['total_messages']:,} messages", state="complete")
+
+                st.success(f"Saved to: `{chat_out}`")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Messages", f"{result['total_messages']:,}")
+                with col2:
+                    st.metric("Images", f"{result['total_images']:,}")
+                with col3:
+                    st.metric("Conversations", result['total_chats'])
+
+                st.markdown(f"""
+Open `{chat_out}/chat_timeline.html` in your browser to view.
+Print with **Cmd+P** — images included, navigation bar hidden.
+
+**For court:** Print to PDF from the browser (Cmd+P → Save as PDF).
+This produces a standard PDF that any court accepts.
+                """)
+
+                db.log_export(export_id, "chat_timeline_html", case_id=selected_case_id,
+                              case_name=case_name, fmt="html",
+                              items_count=result["total_messages"])
+                db.log_action("export", f"Chat timeline HTML: {result['total_messages']:,} messages")
+                st.stop()
 
             elif preset == "Exhibit Bundle (PDF)":
                 st.write("Building exhibit bundle...")
