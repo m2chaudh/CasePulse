@@ -119,6 +119,25 @@ for m in chats_raw:
 
 items.sort(key=lambda x: x["timestamp"] or "")
 
+# ── Thread grouping — link emails in the same RE: chain ──
+from casepulse.storage.database import Database as _ThreadDB
+thread_map = {}  # normalized subject → list of item indices
+for idx, item in enumerate(items):
+    if item["type"] == "email":
+        subj = _ThreadDB.normalize_subject(item.get("subject", ""))
+        if subj:
+            if subj not in thread_map:
+                thread_map[subj] = []
+            thread_map[subj].append(idx)
+
+# Mark items with their thread info
+for subj, indices in thread_map.items():
+    if len(indices) > 1:
+        for i, idx in enumerate(indices):
+            items[idx]["thread_id"] = subj
+            items[idx]["thread_count"] = len(indices)
+            items[idx]["thread_pos"] = i + 1  # 1 of 5, 2 of 5, etc.
+
 # ══════════════════════════════════════════════════════
 # STATS BAR
 # ══════════════════════════════════════════════════════
@@ -282,6 +301,9 @@ for item in page_items:
             badges += f" *{flag}*"
     if item_type == "chat":
         badges += " `CHAT`"
+    # Thread indicator
+    if item.get("thread_count") and item["thread_count"] > 1:
+        badges += f" `thread {item['thread_pos']}/{item['thread_count']}`"
 
     # Sender category color
     sender_cat_list = sender_cats.get(sender, [])
@@ -346,33 +368,30 @@ for item in page_items:
                         size = get_file_size_human(att.get("size_bytes", 0))
                         dup = " (duplicate)" if att.get("is_duplicate") else ""
 
-                        acol1, acol2 = st.columns([3, 1])
-                        with acol1:
-                            st.markdown(f"- **{att['filename']}** ({size}){dup}")
-                        with acol2:
-                            # Preview/download
-                            fpath = att.get("file_path", "")
-                            if fpath and Path(fpath).exists():
-                                ext = Path(fpath).suffix.lower()
-                                if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
-                                    st.image(fpath, width=200)
-                                elif ext == ".pdf":
-                                    st.download_button(
-                                        "Download PDF", Path(fpath).read_bytes(),
-                                        file_name=att["filename"], mime="application/pdf",
-                                        key=f"dl_att_{att['id']}",
-                                    )
-                                else:
-                                    st.download_button(
-                                        "Download", Path(fpath).read_bytes(),
-                                        file_name=att["filename"],
-                                        key=f"dl_att_{att['id']}",
-                                    )
+                        st.markdown(f"**{att['filename']}** ({size}){dup}")
 
-                        # Show extracted text
+                        fpath = att.get("file_path", "")
+                        if fpath and Path(fpath).exists():
+                            ext = Path(fpath).suffix.lower()
+                            if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                                st.image(fpath, width=300)
+                            else:
+                                st.download_button(
+                                    f"Download {att['filename']}",
+                                    Path(fpath).read_bytes(),
+                                    file_name=att["filename"],
+                                    mime="application/pdf" if ext == ".pdf" else "application/octet-stream",
+                                    key=f"dl_att_{att['id']}",
+                                )
+
+                        # Show extracted text inline (preview + expandable full)
                         if att.get("extracted_text"):
-                            with st.expander(f"Text from {att['filename']}"):
-                                st.text(att["extracted_text"][:2000])
+                            extracted = att["extracted_text"]
+                            # Show first 500 chars inline
+                            st.caption(extracted[:500])
+                            if len(extracted) > 500:
+                                with st.expander(f"Full text from {att['filename']} ({len(extracted):,} chars)"):
+                                    st.text(extracted[:5000])
 
         elif item_type == "chat":
             chat_data = None

@@ -25,6 +25,7 @@ preset = st.selectbox(
     "Export type",
     [
         "AI Analysis Package (for Claude/Gemini)",
+        "For My Lawyer (PDF + Notes)",
         "Timeline (PDF)",
         "Timeline (Excel)",
         "Timeline (CSV)",
@@ -155,6 +156,52 @@ if st.button("Generate Export", type="primary"):
                 db.log_action("export", f"AI Analysis Package: {result['estimated_tokens']:,} tokens")
 
                 # Don't continue to the download button flow
+                st.stop()
+
+            elif "Lawyer" in preset:
+                st.write("Building lawyer package (Timeline + Emails + Notes)...")
+                from casepulse.export.pdf_builder import build_timeline_pdf
+                from casepulse.export.timeline_export import build_timeline_excel
+
+                # Timeline PDF
+                pdf_data = build_timeline_pdf(
+                    db, case_name=case_name, case_number=case_number,
+                    date_start=str(export_start), date_end=str(export_end),
+                    case_id=selected_case_id,
+                )
+
+                # Timeline Excel with notes
+                excel_data = build_timeline_excel(
+                    db, case_name=case_name,
+                    date_start=str(export_start), date_end=str(export_end),
+                    case_id=selected_case_id,
+                )
+
+                items = db.get_unified_timeline(str(export_start), str(export_end), limit=50000)
+                items_count = len(items)
+
+                status.update(label=f"Lawyer package ready — {items_count} items", state="complete")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        "Download Timeline (PDF)",
+                        data=pdf_data,
+                        file_name=f"CasePulse_Lawyer_Timeline_{export_start}_{export_end}.pdf",
+                        mime="application/pdf",
+                    )
+                with col2:
+                    st.download_button(
+                        "Download Timeline (Excel with Notes)",
+                        data=excel_data,
+                        file_name=f"CasePulse_Lawyer_Timeline_{export_start}_{export_end}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                # Log
+                db.log_export(export_id, "for_lawyer", case_id=selected_case_id,
+                              case_name=case_name, fmt="pdf+excel", items_count=items_count)
+                db.log_action("export", f"Lawyer package: {items_count} items")
                 st.stop()
 
             elif preset == "Timeline (PDF)":

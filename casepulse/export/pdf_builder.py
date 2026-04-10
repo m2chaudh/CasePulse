@@ -360,13 +360,42 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
             page_counter += 1  # Estimate
 
         elif item_type == "chat":
-            msgs = db.get_chat_messages(limit=1)  # Just for the label
+            import sqlite3 as _sql
+            _chat_conn = _sql.connect(str(db.db_path))
+            _chat_conn.row_factory = _sql.Row
+            chat_msg = _chat_conn.execute(
+                "SELECT * FROM chat_messages WHERE id = ?", (item_id,)
+            ).fetchone()
+            _chat_conn.close()
+
+            chat_name = ""
+            chat_msgs_data = []
+            if chat_msg:
+                chat_name = chat_msg["chat_name"] or ""
+                # Get nearby messages for context (same chat, ±10 messages)
+                _chat_conn2 = _sql.connect(str(db.db_path))
+                _chat_conn2.row_factory = _sql.Row
+                nearby = _chat_conn2.execute(
+                    """SELECT * FROM chat_messages
+                       WHERE chat_name = ? AND id BETWEEN ? AND ?
+                       ORDER BY timestamp LIMIT 20""",
+                    (chat_name, item_id - 10, item_id + 10)
+                ).fetchall()
+                _chat_conn2.close()
+                chat_msgs_data = [dict(m) for m in nearby]
+
             toc_items.append({
                 "exhibit_label": exhibit_label,
-                "date": "",
-                "sender": "Chat",
-                "subject": tag.get("legal_issue", ""),
+                "date": (chat_msg["timestamp"] or "")[:10] if chat_msg else "",
+                "sender": chat_msg["sender"] if chat_msg else "Chat",
+                "subject": chat_name,
                 "page": page_counter,
+            })
+            exhibits.append({
+                "type": "chat",
+                "label": exhibit_label,
+                "data": chat_msgs_data,
+                "chat_name": chat_name,
             })
             page_counter += 1
 
@@ -381,16 +410,34 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
                 exhibit["label"],
                 exhibit.get("attachments", []),
             )
+        elif exhibit["type"] == "chat":
+            pdf.add_chat_exhibit(
+                exhibit["data"],
+                exhibit["label"],
+                chat_name=exhibit.get("chat_name", ""),
+            )
 
     return pdf.output()
 
 
 def _safe(text: str) -> str:
-    """Make text safe for PDF rendering — replace problematic characters."""
+    """Make text safe for PDF rendering — handle Unicode gracefully."""
     if not text:
         return ""
-    # Replace characters that fpdf2 can't render
-    return text.encode("latin-1", errors="replace").decode("latin-1")
+    # Replace characters that fpdf2 can't render in default font
+    # Keep common accented chars, replace emoji and CJK
+    import unicodedata
+    result = []
+    for ch in text:
+        try:
+            ch.encode("latin-1")
+            result.append(ch)
+        except UnicodeEncodeError:
+            # Try to decompose accented characters
+            decomposed = unicodedata.normalize("NFD", ch)
+            ascii_ch = decomposed.encode("ascii", errors="ignore").decode("ascii")
+            result.append(ascii_ch if ascii_ch else "?")
+    return "".join(result)
 
 
 def _format_recipients(recipients) -> str:

@@ -18,6 +18,8 @@ def build_ai_package(db: Database, output_dir: str,
                      date_start: str = "", date_end: str = "",
                      include_chats: bool = True,
                      include_documents: bool = True,
+                     body_cap: int = 1500,
+                     sent_body_cap: int = 500,
                      progress_cb=None) -> dict:
     """Build a complete AI analysis package.
 
@@ -156,7 +158,11 @@ def build_ai_package(db: Database, output_dir: str,
         sender_name = e.get("sender_name", "")
         subject = e.get("subject", "(no subject)")
         direction = e.get("direction", "")
-        body = e.get("body_text", "") or ""
+        body_full = e.get("body_text", "") or ""
+        # Trim body — sent emails shorter (content is in received replies), received emails longer
+        is_own = sender.lower() in [m.lower() for m in my_emails]
+        cap = sent_body_cap if is_own else body_cap
+        body = body_full[:cap] + ("\n[...trimmed...]" if len(body_full) > cap else "")
         is_fwd = "[FORWARDED] " if e.get("is_forwarded") else ""
         mailbox = account_map.get(e.get("account_id"), "")
 
