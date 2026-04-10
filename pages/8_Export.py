@@ -24,6 +24,7 @@ st.markdown("### What do you need?")
 preset = st.selectbox(
     "Export type",
     [
+        "AI Analysis Package (for Claude/Gemini)",
         "Timeline (PDF)",
         "Timeline (Excel)",
         "Timeline (CSV)",
@@ -61,6 +62,20 @@ if cases:
 include_notes = False
 include_chats = True
 
+if "AI Analysis" in preset:
+    st.info(
+        "**AI Analysis Package** generates a folder with everything Claude/Gemini needs:\n"
+        "- **MEGA_FILE.md** — single file with all emails + chats + documents (upload to Claude.ai)\n"
+        "- **Individual files** — one per email, monthly chats, documents\n"
+        "- **INSTRUCTIONS.md** — tells the AI how to analyze your case\n"
+        "- **Attachments** — copies of all email attachments"
+    )
+    ai_output_dir = st.text_input(
+        "Output folder",
+        value=str(Path.home() / "Desktop" / "CasePulse_AI_Package"),
+        key="ai_output_dir",
+    )
+
 if "Exhibit" in preset:
     if not cases:
         st.warning("Create a case and tag evidence first (Cases page) before exporting an exhibit bundle.")
@@ -73,7 +88,7 @@ col1, col2 = st.columns(2)
 with col1:
     include_chats = st.checkbox("Include chat messages", value=True, key="exp_chats")
 with col2:
-    include_notes = st.checkbox("Include annotations/notes", value="Lawyer" in preset or "Full" in preset,
+    include_notes = st.checkbox("Include annotations/notes", value="Lawyer" in preset or "Full" in preset or "AI" in preset,
                                  key="exp_notes")
 
 st.divider()
@@ -88,7 +103,61 @@ if st.button("Generate Export", type="primary"):
 
     with st.status(f"Generating {preset}...", expanded=True) as status:
         try:
-            if preset == "Timeline (PDF)":
+            if "AI Analysis" in preset:
+                st.write("Building AI Analysis Package...")
+                from casepulse.export.ai_package import build_ai_package
+
+                my_emails = [a["email"] for a in db.get_accounts()]
+                result = build_ai_package(
+                    db, output_dir=ai_output_dir,
+                    case_name=case_name,
+                    my_emails=my_emails,
+                    date_start=str(export_start), date_end=str(export_end),
+                    include_chats=include_chats,
+                    include_documents=True,
+                    progress_cb=lambda msg: st.write(msg),
+                )
+
+                status.update(label=f"AI Package ready — {result['estimated_tokens']:,} tokens", state="complete")
+
+                st.success(f"Package exported to: `{ai_output_dir}`")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Emails", f"{result['total_emails']:,}")
+                with col2:
+                    st.metric("Chat Messages", f"{result['total_chats']:,}")
+                with col3:
+                    st.metric("Est. Tokens", f"{result['estimated_tokens']:,}")
+
+                st.markdown(f"""
+### How to use this package:
+
+**Claude.ai (recommended — your 1M context):**
+1. Go to claude.ai
+2. Start a new conversation
+3. Upload `{ai_output_dir}/MEGA_FILE.md`
+4. Upload `{ai_output_dir}/INSTRUCTIONS.md`
+5. Ask: "Analyze this case data. Start with a summary of key findings."
+
+**Claude Desktop:**
+1. Same as above — drag and drop the files
+
+**Claude Code:**
+1. Open a new Claude Code session
+2. Tell it: "Read all files in {ai_output_dir} and analyze my case"
+                """)
+
+                # Log export
+                db.log_export(export_id, "ai_package", case_id=selected_case_id,
+                              case_name=case_name, fmt="markdown",
+                              items_count=result["total_emails"] + result["total_chats"],
+                              manifest=json.dumps(result, default=str))
+                db.log_action("export", f"AI Analysis Package: {result['estimated_tokens']:,} tokens")
+
+                # Don't continue to the download button flow
+                st.stop()
+
+            elif preset == "Timeline (PDF)":
                 st.write("Building PDF timeline...")
                 from casepulse.export.pdf_builder import build_timeline_pdf
                 data = build_timeline_pdf(
