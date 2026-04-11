@@ -31,6 +31,7 @@ preset = st.selectbox(
         "Timeline — Summary/Index (PDF)",
         "Timeline (Excel)",
         "Timeline (CSV)",
+        "Interactive Timeline (HTML — search, bookmarks, lightbox)",
         "Chat Timeline (HTML with images)",
         "Exhibit Bundle (PDF)",
         "Full Data (JSON)",
@@ -300,6 +301,56 @@ if st.button("Generate Export", type="primary"):
                 fmt = "csv"
                 items = db.get_unified_timeline(str(export_start), str(export_end), limit=50000)
                 items_count = len(items)
+
+            elif "Interactive Timeline" in preset:
+                st.write("Building interactive HTML timeline...")
+                from casepulse.export.interactive_timeline import build_interactive_timeline
+                from pathlib import Path as _P
+
+                interactive_out = str(_P.home() / "Desktop" / "CasePulse_Interactive_Timeline")
+                result = build_interactive_timeline(
+                    db, output_dir=interactive_out,
+                    case_name=case_name,
+                    date_start=str(export_start), date_end=str(export_end),
+                    include_chats=include_chats,
+                    case_id=selected_case_id,
+                    progress_cb=lambda msg: st.write(msg),
+                )
+
+                status.update(label=f"Interactive timeline ready — {result['total_items']:,} items", state="complete")
+
+                st.success(f"Saved to: `{interactive_out}`")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Items", f"{result['total_items']:,}")
+                with col2:
+                    st.metric("Emails", f"{result['total_emails']:,}")
+                with col3:
+                    st.metric("Chats", f"{result['total_chats']:,}")
+                with col4:
+                    st.metric("Images", result['total_images'])
+
+                file_mb = result['file_size'] / (1024 * 1024)
+                st.markdown(f"""
+**Open:** `{interactive_out}/timeline.html` in your browser
+
+**Features:**
+- Search across all emails and chats (type in search box)
+- Filter: All, Emails, Chats, Sent, Received, Attachments, Bookmarked
+- Click any item to expand full body + attachments
+- Star items to bookmark them (persists in browser)
+- Add notes to any item (Enter to save)
+- Click images for full-screen lightbox
+- Dark/light theme toggle
+- Print with Cmd+P (clean output, no UI elements)
+- File size: {file_mb:.1f} MB
+                """)
+
+                db.log_export(export_id, "interactive_html", case_id=selected_case_id,
+                              case_name=case_name, fmt="html",
+                              items_count=result["total_items"])
+                db.log_action("export", f"Interactive timeline: {result['total_items']:,} items")
+                st.stop()
 
             elif "Chat Timeline" in preset:
                 st.write("Building chat timeline HTML with inline images...")
