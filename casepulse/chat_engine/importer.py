@@ -191,6 +191,40 @@ def import_chatvault_html(file_path: str, db: Database,
     )
 
 
+def import_appclose_pdf(file_path: str, db: Database,
+                        progress_cb: Optional[Callable] = None) -> dict:
+    """Import an AppClose co-parenting app PDF export."""
+    from casepulse.chat_engine.appclose_parser import parse_appclose_pdf, get_participants
+
+    if progress_cb:
+        progress_cb("Parsing AppClose PDF export...")
+
+    messages = parse_appclose_pdf(file_path)
+    if not messages:
+        return {"error": "No messages found in AppClose PDF", "count": 0}
+
+    chat_name = "AppClose"
+    participants = get_participants(messages)
+    batch_id = f"appclose_{Path(file_path).stem}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    # Convert to standard message format
+    converted = []
+    for m in messages:
+        converted.append({
+            "timestamp": m["timestamp"],
+            "sender": m["sender"],
+            "message": m["message"],
+            "is_system": m.get("is_system", False),
+            "has_media": m.get("has_media", False),
+            "media_ref": m.get("media_ref", ""),
+        })
+
+    return _store_messages(
+        db, converted, "appclose", file_path, "AppClose",
+        chat_name, participants, batch_id, progress_cb,
+    )
+
+
 def import_pdf_chat(file_path: str, db: Database,
                      platform: str = "auto",
                      progress_cb: Optional[Callable] = None) -> dict:

@@ -16,9 +16,10 @@ from components.page_init import init_page
 db, config = init_page()
 
 # ── Import Methods ──
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Bulk Directory Import",
     "WhatsApp File",
+    "AppClose PDF",
     "PDF Chat Export",
     "ChatVault HTML",
 ])
@@ -117,8 +118,41 @@ with tab2:
                 )
                 st.success(f"Imported **{result['count']}** messages from **{result['chat_name']}**")
 
-# ── Tab 3: PDF Chat Export ──
+# ── Tab 3: AppClose PDF ──
 with tab3:
+    st.markdown("### Import AppClose Co-Parenting App Export")
+    st.markdown("Upload a PDF exported from the AppClose app.")
+
+    ac_file = st.file_uploader(
+        "AppClose PDF export",
+        type=["pdf"],
+        key="ac_upload",
+    )
+
+    if ac_file and st.button("Import AppClose Chat"):
+        tmp_dir = Path("/tmp/casepulse_uploads")
+        tmp_dir.mkdir(exist_ok=True)
+        tmp_path = tmp_dir / ac_file.name
+        tmp_path.write_bytes(ac_file.read())
+
+        with st.status("Importing AppClose...", expanded=True) as status:
+            from casepulse.chat_engine.importer import import_appclose_pdf
+
+            result = import_appclose_pdf(str(tmp_path), db,
+                                          progress_cb=lambda msg: st.write(msg))
+
+            if "error" in result:
+                status.update(label="Import failed", state="error")
+                st.error(result["error"])
+            else:
+                status.update(
+                    label=f"Imported {result['count']} messages from AppClose",
+                    state="complete",
+                )
+                st.success(f"Imported **{result['count']}** messages from AppClose")
+
+# ── Tab 4: PDF Chat Export ──
+with tab4:
     st.markdown("### Import Chat from PDF")
     st.markdown("Upload a PDF export from any chat app (iMessage, Messenger, etc.)")
 
@@ -155,8 +189,8 @@ with tab3:
                     label += " (raw text — could not parse individual messages)"
                 status.update(label=label, state="complete")
 
-# ── Tab 4: ChatVault HTML ──
-with tab4:
+# ── Tab 5: ChatVault HTML ──
+with tab5:
     st.markdown("### Import ChatVault Export")
     st.markdown("Point to the ChatVault `index.html` file or upload it.")
 

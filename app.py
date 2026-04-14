@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from casepulse.storage.database import Database
 from casepulse.config import Config
+from casepulse.setup_wizard import is_setup_complete
 
 st.set_page_config(
     page_title="CasePulse",
@@ -69,6 +70,14 @@ def main():
     init_session()
     db: Database = st.session_state.db
     config: Config = st.session_state.config
+
+    # First-run setup redirect
+    if not is_setup_complete():
+        st.markdown("## Welcome to CasePulse")
+        st.info("Please complete the initial setup first.")
+        st.page_link("pages/0_Setup.py", label="Go to Setup", icon=None)
+        st.stop()
+        return
 
     # PIN lock gate
     from casepulse.legal.pin_lock import render_pin_gate, is_pin_set

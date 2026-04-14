@@ -3,26 +3,42 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
 
+def _is_desktop_mode() -> bool:
+    """Check if running as packaged desktop app."""
+    return os.environ.get("CASEPULSE_DESKTOP") == "1" or getattr(sys, "frozen", False)
+
+
 def get_project_root() -> Path:
     """Get the CasePulse project root directory."""
+    if getattr(sys, "frozen", False):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS)
     return Path(__file__).parent.parent
 
 
 def get_data_dir() -> Path:
-    """Get the data directory, creating it if needed."""
-    data_dir = get_project_root() / "data"
+    """Get the data directory, creating it if needed.
+
+    Desktop mode: ~/CasePulse/  (persists across app updates)
+    Dev mode: <project>/data/   (in source tree)
+    """
+    if _is_desktop_mode():
+        data_dir = Path.home() / "CasePulse"
+    else:
+        data_dir = get_project_root() / "data"
     data_dir.mkdir(exist_ok=True)
-    for sub in ["tokens", "attachments", "db", "chroma"]:
+    for sub in ["tokens", "attachments", "db", "chroma", "documents"]:
         (data_dir / sub).mkdir(exist_ok=True)
     return data_dir
 
 
 def get_config_path() -> Path:
-    return get_project_root() / "config.json"
+    return get_data_dir() / "config.json"
 
 
 DEFAULT_CONFIG = {
@@ -55,7 +71,19 @@ class Config:
     def __init__(self):
         self._path = get_config_path()
         self._data: dict[str, Any] = {}
+        self._migrate_legacy_config()
         self.load()
+
+    def _migrate_legacy_config(self):
+        """Migrate config.json from project root to data dir if needed."""
+        if self._path.exists():
+            return  # Already have config in data dir
+        # Check for legacy config at project root
+        legacy = get_project_root() / "config.json"
+        if legacy.exists() and legacy != self._path:
+            import shutil
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(legacy), str(self._path))
 
     def load(self):
         if self._path.exists():
