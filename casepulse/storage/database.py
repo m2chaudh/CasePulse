@@ -395,6 +395,118 @@ CREATE TABLE IF NOT EXISTS metadata_attestations (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_metadata_attestations_pm ON metadata_attestations(photo_metadata_id);
+
+-- ── FTS5 virtual tables (Task 2.1 + 2.2) ──
+
+CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(
+  subject, body_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS emails_ai AFTER INSERT ON emails BEGIN
+  INSERT INTO emails_fts(rowid, subject, body_text)
+  VALUES (new.id, new.subject, new.body_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS emails_ad AFTER DELETE ON emails BEGIN
+  INSERT INTO emails_fts(emails_fts, rowid, subject, body_text)
+  VALUES('delete', old.id, old.subject, old.body_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS emails_au AFTER UPDATE ON emails BEGIN
+  INSERT INTO emails_fts(emails_fts, rowid, subject, body_text)
+  VALUES('delete', old.id, old.subject, old.body_text);
+  INSERT INTO emails_fts(rowid, subject, body_text)
+  VALUES (new.id, new.subject, new.body_text);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(
+  message_text, sender, chat_name,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(rowid, message_text, sender, chat_name)
+  VALUES (new.id, new.message_text, new.sender, new.chat_name);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(chat_messages_fts, rowid, message_text, sender, chat_name)
+  VALUES('delete', old.id, old.message_text, old.sender, old.chat_name);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_messages_au AFTER UPDATE ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(chat_messages_fts, rowid, message_text, sender, chat_name)
+  VALUES('delete', old.id, old.message_text, old.sender, old.chat_name);
+  INSERT INTO chat_messages_fts(rowid, message_text, sender, chat_name)
+  VALUES (new.id, new.message_text, new.sender, new.chat_name);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS attachments_fts USING fts5(
+  filename, extracted_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS attachments_ai AFTER INSERT ON attachments BEGIN
+  INSERT INTO attachments_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_ad AFTER DELETE ON attachments BEGIN
+  INSERT INTO attachments_fts(attachments_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_au AFTER UPDATE ON attachments BEGIN
+  INSERT INTO attachments_fts(attachments_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+  INSERT INTO attachments_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+  filename, extracted_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+  INSERT INTO documents_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+  INSERT INTO documents_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS annotations_fts USING fts5(
+  note_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS annotations_ai AFTER INSERT ON annotations BEGIN
+  INSERT INTO annotations_fts(rowid, note_text)
+  VALUES (new.id, new.note_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS annotations_ad AFTER DELETE ON annotations BEGIN
+  INSERT INTO annotations_fts(annotations_fts, rowid, note_text)
+  VALUES('delete', old.id, old.note_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS annotations_au AFTER UPDATE ON annotations BEGIN
+  INSERT INTO annotations_fts(annotations_fts, rowid, note_text)
+  VALUES('delete', old.id, old.note_text);
+  INSERT INTO annotations_fts(rowid, note_text)
+  VALUES (new.id, new.note_text);
+END;
 """
 
 
