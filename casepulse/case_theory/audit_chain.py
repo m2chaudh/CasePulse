@@ -41,18 +41,28 @@ def log_chained(db: Database, *, action: str, details: dict) -> int:
 
 
 def verify_chain(db: Database) -> bool:
-    """Walk the chain end-to-end, recomputing each row_hash."""
+    """Walk the chain end-to-end, recomputing each row_hash.
+
+    Pre-W1 rows (NULL row_hash) are skipped — the chain starts at the first
+    chained row. Malformed details JSON is treated as a plain string for
+    canonicalization rather than raising.
+    """
     conn = db._get_conn()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, action, details, prev_hash, row_hash
-        FROM audit_log ORDER BY id
+        FROM audit_log
+        WHERE row_hash IS NOT NULL
+        ORDER BY id
     """)
     expected_prev = None
     for row_id, action, details_json, stored_prev, stored_row in cur.fetchall():
         if stored_prev != expected_prev:
             return False
-        details = json.loads(details_json) if details_json else {}
+        try:
+            details = json.loads(details_json) if details_json else {}
+        except json.JSONDecodeError:
+            details = details_json
         row_data = {"action": action, "details": details}
         base = (stored_prev or "") + _canonicalize(row_data).decode()
         recomputed = hashlib.sha256(base.encode("utf-8")).hexdigest()

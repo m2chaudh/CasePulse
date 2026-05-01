@@ -32,3 +32,21 @@ def test_verify_chain_detects_tampering(tmp_db):
     cur.execute("UPDATE audit_log SET action = 'TAMPERED' WHERE id = 1")
     conn.commit()
     assert verify_chain(tmp_db) is False
+
+
+def test_verify_chain_skips_pre_w1_legacy_rows(tmp_db):
+    """Pre-W1 rows have NULL row_hash and possibly non-JSON details. They
+    should be ignored by verify_chain rather than crashing JSON parse.
+    """
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    # Simulate a pre-W1 row: NULL row_hash, plain-text details
+    cur.execute(
+        "INSERT INTO audit_log (action, details) VALUES (?, ?)",
+        ("pre_w1_action", "Set PIN"),
+    )
+    conn.commit()
+    # Now log a real chained row
+    log_chained(tmp_db, action="post_w1", details={"id": 1})
+    # Chain verification should pass — legacy row is skipped
+    assert verify_chain(tmp_db) is True
