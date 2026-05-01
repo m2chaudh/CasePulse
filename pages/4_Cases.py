@@ -99,7 +99,7 @@ with tab_evidence:
     # Source and filter
     col1, col2, col3 = st.columns(3)
     with col1:
-        source_type = st.selectbox("Source", ["Emails", "Chat Messages"], key="ev_source")
+        source_type = st.selectbox("Source", ["Emails", "Chat Messages", "Documents", "Attachments"], key="ev_source")
     with col2:
         # Get legal issues for this case type
         issues_for_type = LEGAL_ISSUES.get(active_case["case_type"], [])
@@ -126,7 +126,7 @@ with tab_evidence:
             limit=200,
         )
         item_type = "email"
-    else:
+    elif source_type == "Chat Messages":
         items = db.get_chat_messages(
             keyword=search if search else None,
             date_start=config.date_start,
@@ -134,9 +134,61 @@ with tab_evidence:
             limit=200,
         )
         item_type = "chat"
+    elif source_type == "Documents":
+        items = db.get_documents()
+        # Client-side keyword filter (db.get_documents doesn't accept one yet)
+        if search:
+            kw = search.lower()
+            items = [
+                d for d in items
+                if kw in (d.get("filename") or "").lower()
+                or kw in (d.get("extracted_text") or "")[:5000].lower()
+            ]
+        items = items[:200]
+        item_type = "document"
+    else:  # Attachments
+        # Pull attachment rows joined to email metadata for context
+        conn = db._get_conn()
+        cur = conn.cursor()
+        if search:
+            kw_pat = f"%{search}%"
+            cur.execute(
+                """SELECT a.id, a.filename, a.content_type, a.size_bytes,
+                          a.email_id, a.extracted_text, e.date_received,
+                          e.sender_email
+                     FROM attachments a
+                     LEFT JOIN emails e ON e.id = a.email_id
+                    WHERE a.filename LIKE ? OR a.extracted_text LIKE ?
+                    ORDER BY a.id DESC
+                    LIMIT 200""",
+                (kw_pat, kw_pat),
+            )
+        else:
+            cur.execute(
+                """SELECT a.id, a.filename, a.content_type, a.size_bytes,
+                          a.email_id, a.extracted_text, e.date_received,
+                          e.sender_email
+                     FROM attachments a
+                     LEFT JOIN emails e ON e.id = a.email_id
+                    ORDER BY a.id DESC
+                    LIMIT 200"""
+            )
+        items = [
+            {
+                "id": r[0], "filename": r[1], "content_type": r[2],
+                "size_bytes": r[3], "email_id": r[4],
+                "extracted_text": r[5], "date_received": r[6],
+                "sender_email": r[7],
+            }
+            for r in cur.fetchall()
+        ]
+        item_type = "attachment"
 
     if not items:
-        st.info(f"No {source_type.lower()} found. Fetch emails or import chats first.")
+        st.info(
+            f"No {source_type.lower()} found. "
+            f"{'Fetch emails or import chats first.' if source_type in ('Emails','Chat Messages') else 'Import documents from the Documents page first.' if source_type=='Documents' else 'Attachments are pulled from emails — fetch emails first.'}"
+        )
     else:
         # Bulk operations
         st.markdown("#### Bulk Operations")
@@ -206,10 +258,18 @@ with tab_evidence:
                 dt = (item.get("date_received") or "")[:16]
                 sender = item.get("sender_email", "")
                 preview = item.get("subject", "") or (item.get("body_text") or "")[:80]
-            else:
+            elif item_type == "chat":
                 dt = (item.get("timestamp") or "")[:16]
                 sender = item.get("sender", "")
                 preview = (item.get("message_text") or "")[:80]
+            elif item_type == "document":
+                dt = (item.get("timeline_date") or item.get("created_at") or "")[:16]
+                sender = item.get("filename", "")
+                preview = (item.get("extracted_text") or "")[:80]
+            else:  # attachment
+                dt = (item.get("date_received") or "")[:16]
+                sender = item.get("sender_email") or item.get("filename", "")
+                preview = item.get("filename", "") + " — " + (item.get("extracted_text") or "")[:60]
 
             # Tag indicators
             tag_badges = ""
@@ -249,11 +309,36 @@ with tab_evidence:
                             st.text_area("Content", body[:2000], height=150,
                                          disabled=True, key=f"body_{item_type}_{item_id}",
                                          label_visibility="collapsed")
-                    else:
+                    elif item_type == "chat":
                         st.markdown(f"**From:** {sender}")
                         st.markdown(f"**Date:** {item.get('timestamp', '')}")
                         st.markdown(f"**Chat:** {item.get('chat_name', '')}")
                         st.text(item.get("message_text", ""))
+                    elif item_type == "document":
+                        st.markdown(f"**File:** {item.get('filename', '')}")
+                        st.markdown(f"**Date:** {item.get('timeline_date') or item.get('created_at', '')}")
+                        st.markdown(f"**Source:** {item.get('source_path') or item.get('file_path', '')}")
+                        ext = item.get("extracted_text", "") or ""
+                        if ext:
+                            st.text_area(
+                                "Extracted text", ext[:2000], height=150,
+                                disabled=True, key=f"body_{item_type}_{item_id}",
+                                label_visibility="collapsed",
+                            )
+                    else:  # attachment
+                        st.markdown(f"**File:** {item.get('filename', '')}")
+                        st.markdown(
+                            f"**From email:** {item.get('sender_email') or '?'} "
+                            f"on {item.get('date_received') or '?'}"
+                        )
+                        st.markdown(f"**Type:** {item.get('content_type') or '?'}")
+                        ext = item.get("extracted_text", "") or ""
+                        if ext:
+                            st.text_area(
+                                "Extracted text", ext[:2000], height=150,
+                                disabled=True, key=f"body_{item_type}_{item_id}",
+                                label_visibility="collapsed",
+                            )
 
                     # Inline tagging
                     st.markdown("**Quick Tag:**")
