@@ -14,6 +14,20 @@ class ResolvedSource:
     file_path: str | None = None  # for attachments / documents / photos
 
 
+def _deleted_sentinel(e: Evidence) -> ResolvedSource:
+    """Return a sentinel ResolvedSource when the source row no longer exists."""
+    kind = e.evidence_kind.value if hasattr(e, "evidence_kind") else "unknown"
+    return ResolvedSource(
+        kind=kind,
+        text="[source row deleted]",
+        metadata={
+            "deleted": True,
+            "source_table": e.source_table,
+            "source_row_id": e.source_row_id,
+        },
+    )
+
+
 def resolve(db: Database, e: Evidence) -> ResolvedSource:
     conn = db._get_conn()
     cur = conn.cursor()
@@ -25,6 +39,8 @@ def resolve(db: Database, e: Evidence) -> ResolvedSource:
             FROM emails WHERE id = ?
         """, (e.source_row_id,))
         r = cur.fetchone()
+        if not r:
+            return _deleted_sentinel(e)
         return ResolvedSource(
             kind="email",
             text=r[1] or "",
@@ -42,6 +58,8 @@ def resolve(db: Database, e: Evidence) -> ResolvedSource:
             FROM chat_messages WHERE id = ?
         """, (e.source_row_id,))
         r = cur.fetchone()
+        if not r:
+            return _deleted_sentinel(e)
         return ResolvedSource(
             kind="chat",
             text=r[0] or "",
@@ -59,6 +77,8 @@ def resolve(db: Database, e: Evidence) -> ResolvedSource:
             FROM attachments WHERE id = ?
         """, (e.source_row_id,))
         r = cur.fetchone()
+        if not r:
+            return _deleted_sentinel(e)
         return ResolvedSource(
             kind="attachment",
             text=r[3] or "",
@@ -76,6 +96,8 @@ def resolve(db: Database, e: Evidence) -> ResolvedSource:
             FROM documents WHERE id = ?
         """, (e.source_row_id,))
         r = cur.fetchone()
+        if not r:
+            return _deleted_sentinel(e)
         return ResolvedSource(
             kind="document",
             text=r[2] or "",
@@ -90,6 +112,8 @@ def resolve(db: Database, e: Evidence) -> ResolvedSource:
             FROM annotations WHERE id = ?
         """, (e.source_row_id,))
         r = cur.fetchone()
+        if not r:
+            return _deleted_sentinel(e)
         return ResolvedSource(
             kind="annotation",
             text=r[0] or "",
