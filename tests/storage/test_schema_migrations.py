@@ -106,3 +106,19 @@ def test_metadata_attestations_table(tmp_db):
     assert cols == {'id', 'photo_metadata_id', 'field_name', 'status',
                     'reason', 'attestation_text', 'attested_by',
                     'attested_at', 'created_at'}
+
+
+def test_cases_has_case_type_column(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(cases)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert 'case_type' in cols
+
+
+def test_cases_default_case_type_is_family(tmp_db):
+    case_id = tmp_db.create_case(name="Test", case_number="T1")
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT case_type FROM cases WHERE id = ?", (case_id,))
+    assert cur.fetchone()[0] == 'family'

@@ -1142,7 +1142,7 @@ class Database:
 
     # ── Case operations ──
 
-    def create_case(self, name: str, case_type: str, case_number: str = "",
+    def create_case(self, name: str, case_type: str = 'family', case_number: str = "",
                     description: str = "", exhibit_format: str = "alpha",
                     exhibit_prefix: str = "") -> int:
         with self._get_conn() as conn:
