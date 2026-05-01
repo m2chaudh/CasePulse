@@ -105,3 +105,35 @@ def test_workbench_renders_arguments_for_contradiction(page_test, tmp_db_with_ca
     assert not at.exception
     text = "\n".join((m.value or "") for m in at.markdown)
     assert "Was at party" in text
+
+
+def test_argument_witness_statement_link(page_test, tmp_db_with_case):
+    """When a Witness-type argument has linked statements, they surface in the editor."""
+    db, case_id = tmp_db_with_case
+    from casepulse.case_theory.models import (
+        Contradiction, Argument, ArgumentType, Strength,
+        Witness, WitnessStatement,
+    )
+    from casepulse.case_theory.repository import (
+        create_contradiction, create_argument,
+        create_witness, create_witness_statement,
+    )
+    c = create_contradiction(db, Contradiction(case_id=case_id, headline="C-Witness"))
+    a = create_argument(db, Argument(
+        contradiction_id=c.id, title="Witness testifies",
+        argument_type=ArgumentType.WITNESS, strength=Strength.STRONG,
+    ))
+    w = create_witness(db, Witness(case_id=case_id, name="Jane Doe",
+                                    relationship="colleague"))
+    create_witness_statement(db, WitnessStatement(
+        witness_id=w.id,
+        statement_text="She heard the conversation clearly.",
+        argument_id=a.id,
+    ))
+
+    at = page_test("pages/1_Case_Theory.py")
+    at.session_state.db = db
+    at.run()
+    assert not at.exception
+    text = "\n".join((m.value or "") for m in at.markdown)
+    assert "She heard the conversation clearly." in text

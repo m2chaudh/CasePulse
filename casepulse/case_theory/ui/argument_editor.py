@@ -9,6 +9,7 @@ from casepulse.case_theory.models import (
 from casepulse.case_theory.repository import (
     list_arguments_for_contradiction, create_argument,
     update_argument, list_evidence_for_argument,
+    list_statements_for_argument, get_witness,
 )
 from casepulse.case_theory.ui.source_row_card import (
     format_one_line_meta, icon_for,
@@ -59,6 +60,28 @@ def render(db, *, contradiction_id: int) -> None:
                         show_refine(db, evidence_id=ev.id,
                                     source_table=ev.source_table,
                                     source_row_id=ev.source_row_id)
+
+            # Witness statements pane — only shown for Witness-type arguments
+            if a.argument_type == ArgumentType.WITNESS:
+                st.markdown("**Linked witness statements**")
+                linked_stmts = list_statements_for_argument(db, a.id)
+                if linked_stmts:
+                    for stmt in linked_stmts:
+                        witness = get_witness(db, stmt.witness_id)
+                        if witness:
+                            name = witness.name
+                            rel = f" ({witness.relationship})" if witness.relationship else ""
+                        else:
+                            name = f"Witness #{stmt.witness_id}"
+                            rel = ""
+                        st.markdown(
+                            f"- **{name}**{rel} — \"{stmt.statement_text}\""
+                        )
+                else:
+                    st.caption(
+                        "No witness statements linked. "
+                        "Add one from the **Witnesses** page."
+                    )
 
             if st.button(f"Edit", key=f"edit_arg_{a.id}"):
                 set_recent_argument_id(st.session_state, a.id)
