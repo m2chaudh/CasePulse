@@ -1,4 +1,5 @@
 """Hybrid retrieval: BM25 + ChromaDB embedding + RRF fusion."""
+import json
 from dataclasses import dataclass
 
 from casepulse.search.citation import Citation
@@ -50,20 +51,58 @@ def _embedding_search(db: Database, query: str,
             "document": "documents",
         }
         table = table_map.get(kind, "emails")
-        row_id = (
-            meta.get("email_id")
-            or meta.get("attachment_id")
-            or meta.get("document_id")
-            or 0
-        )
-        hits.append(SearchHit(
-            citation=Citation(
-                table=table,  # type: ignore[arg-type]
-                row_id=row_id,
-                snippet=entry["text"][:200],
-            ),
-            score=entry["relevance_score"],
-        ))
+        snippet = entry["text"][:200]
+        score = entry["relevance_score"]
+
+        if kind == "chat":
+            # Chat chunks store multiple message IDs; expand to one Citation each
+            # so RRF dedup works per-message rather than collapsing all chat hits
+            # into the row_id=0 sentinel.
+            ids_json = meta.get("chat_message_ids")
+            if ids_json:
+                try:
+                    msg_ids = json.loads(ids_json)
+                except (json.JSONDecodeError, TypeError):
+                    msg_ids = []
+            else:
+                first_id = meta.get("first_chat_message_id")
+                msg_ids = [first_id] if first_id else []
+
+            if msg_ids:
+                for msg_id in msg_ids:
+                    hits.append(SearchHit(
+                        citation=Citation(
+                            table="chat_messages",  # type: ignore[arg-type]
+                            row_id=msg_id,
+                            snippet=snippet,
+                        ),
+                        score=score,
+                    ))
+            else:
+                # Fallback: no IDs at all in metadata (old chunk format)
+                hits.append(SearchHit(
+                    citation=Citation(
+                        table="chat_messages",  # type: ignore[arg-type]
+                        row_id=meta.get("first_chat_message_id") or 0,
+                        snippet=snippet,
+                    ),
+                    score=score,
+                ))
+        else:
+            row_id = (
+                meta.get("email_id")
+                or meta.get("attachment_id")
+                or meta.get("document_id")
+                or 0
+            )
+            hits.append(SearchHit(
+                citation=Citation(
+                    table=table,  # type: ignore[arg-type]
+                    row_id=row_id,
+                    snippet=snippet,
+                ),
+                score=score,
+            ))
     return hits
 
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from casepulse.storage.database import Database
 
@@ -222,6 +222,10 @@ def _build_chat_chunk(messages: list[dict], chunk_index: int) -> Optional[dict]:
     body = "\n".join(lines)
     senders = list(set(m.get("sender", "") for m in messages if m.get("sender")))
 
+    # Collect message IDs for per-message citation in search results.
+    # ChromaDB metadata values must be scalars, so we JSON-encode the list.
+    msg_ids = [m["id"] for m in messages if m.get("id") is not None]
+
     return {
         "text": header + body,
         "metadata": {
@@ -233,6 +237,8 @@ def _build_chat_chunk(messages: list[dict], chunk_index: int) -> Optional[dict]:
             "date_end": last_ts[:10] if last_ts else "",
             "subject": chat_name,
             "chunk_index": chunk_index,
+            "chat_message_ids": json.dumps(msg_ids),
+            "first_chat_message_id": msg_ids[0] if msg_ids else None,
         },
     }
 
