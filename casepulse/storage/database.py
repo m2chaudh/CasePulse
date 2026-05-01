@@ -560,7 +560,33 @@ class Database:
             h = hashlib.sha256((text or "").encode("utf-8")).hexdigest()
             cur.execute("UPDATE chat_messages SET content_hash = ? WHERE id = ?", (h, row_id))
 
+        # Task 2.3: backfill FTS5 indices for pre-existing rows
+        self._backfill_fts_if_empty(cur, "emails_fts", "emails",
+                                     ["subject", "body_text"])
+        self._backfill_fts_if_empty(cur, "chat_messages_fts", "chat_messages",
+                                     ["message_text", "sender", "chat_name"])
+        self._backfill_fts_if_empty(cur, "attachments_fts", "attachments",
+                                     ["filename", "extracted_text"])
+        self._backfill_fts_if_empty(cur, "documents_fts", "documents",
+                                     ["filename", "extracted_text"])
+        self._backfill_fts_if_empty(cur, "annotations_fts", "annotations",
+                                     ["note_text"])
+
         conn.commit()
+
+    def _backfill_fts_if_empty(self, cur, fts_table: str, source_table: str,
+                                select_cols: list) -> None:
+        """Backfill an FTS5 contentless table from its source table if under-indexed."""
+        cur.execute(f"SELECT COUNT(*) FROM {fts_table}")
+        fts_count = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM {source_table}")
+        source_count = cur.fetchone()[0]
+        if fts_count < source_count:
+            col_list = ", ".join(select_cols)
+            cur.execute(
+                f"INSERT INTO {fts_table}(rowid, {col_list}) "
+                f"SELECT id, {col_list} FROM {source_table}"
+            )
 
     # ── Account operations ──
 
