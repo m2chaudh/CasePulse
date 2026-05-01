@@ -63,6 +63,31 @@ def test_view_as_exhibit_button_present(page_test, tmp_db_with_case):
            or any("preview brief" in (lbl or "").lower() for lbl in button_labels)
 
 
+def test_refine_snippet_updates_char_range(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    from casepulse.case_theory.models import Evidence, EvidenceKind
+    from casepulse.case_theory.repository import (
+        create_evidence, update_evidence_snippet,
+    )
+    conn = db._get_conn(); cur = conn.cursor()
+    cur.execute("INSERT INTO emails (subject, body_text, sender_email, "
+                "message_id, content_hash) VALUES "
+                "('S', 'Para A.\\n\\nPara B.\\n\\nPara C.', 'a@x', '<m1>', 'h1')")
+    conn.commit()
+    e = create_evidence(db, Evidence(
+        evidence_kind=EvidenceKind.EMAIL,
+        source_table="emails", source_row_id=cur.lastrowid,
+    ))
+    # Refine to second paragraph
+    update_evidence_snippet(db, e.id, char_start=8, char_end=15,
+                            snippet="Para B.")
+    cur.execute("SELECT char_start, char_end, snippet FROM evidence WHERE id = ?", (e.id,))
+    row = cur.fetchone()
+    assert row[0] == 8
+    assert row[1] == 15
+    assert row[2] == "Para B."
+
+
 def test_workbench_renders_arguments_for_contradiction(page_test, tmp_db_with_case):
     """When a contradiction has arguments, they appear in the left pane."""
     db, case_id = tmp_db_with_case
