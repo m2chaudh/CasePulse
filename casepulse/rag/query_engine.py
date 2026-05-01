@@ -88,7 +88,16 @@ class QueryEngine:
                 if date_end and date > date_end:
                     continue
                 filtered.append(hit)
-            hits = filtered if filtered else hits  # Fall back to unfiltered if all filtered out
+            # Old behavior: if not filtered: filtered = hits  ← silently broadened
+            # New behavior: if not filtered, return [] and log a warning.
+            if not filtered and hits:
+                import logging
+                logging.warning(
+                    "Ask query had %d candidate hits but all were outside the date "
+                    "filter %s..%s; returning empty rather than silently broadening.",
+                    len(hits), date_start, date_end,
+                )
+            hits = filtered
 
         # Build context from retrieved chunks
         context_chunks = [hit["text"] for hit in hits]
