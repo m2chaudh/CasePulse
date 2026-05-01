@@ -320,6 +320,31 @@ CREATE TABLE IF NOT EXISTS contradiction_allegations (
   allegation_id INTEGER NOT NULL REFERENCES allegations(id) ON DELETE CASCADE,
   PRIMARY KEY (contradiction_id, allegation_id)
 );
+
+CREATE TABLE IF NOT EXISTS arguments (
+  id INTEGER PRIMARY KEY,
+  contradiction_id INTEGER NOT NULL REFERENCES contradictions(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  reasoning_text TEXT,
+  argument_type TEXT,
+  strength TEXT,
+  sequence INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_arguments_contradiction ON arguments(contradiction_id);
+CREATE INDEX IF NOT EXISTS idx_arguments_type ON arguments(argument_type);
+CREATE INDEX IF NOT EXISTS idx_arguments_strength ON arguments(strength);
+
+CREATE TABLE IF NOT EXISTS argument_evidence (
+  argument_id INTEGER NOT NULL REFERENCES arguments(id) ON DELETE CASCADE,
+  evidence_id INTEGER NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+  role TEXT DEFAULT 'supports',
+  display_order INTEGER DEFAULT 0,
+  notes TEXT,
+  added_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (argument_id, evidence_id)
+);
 """
 
 

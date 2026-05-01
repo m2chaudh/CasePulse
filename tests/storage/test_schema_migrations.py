@@ -56,3 +56,22 @@ def test_contradiction_allegations_bridge(tmp_db):
     cur.execute("PRAGMA table_info(contradiction_allegations)")
     cols = {row[1] for row in cur.fetchall()}
     assert cols == {'contradiction_id', 'allegation_id'}
+
+
+def test_arguments_table(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(arguments)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'id', 'contradiction_id', 'title', 'reasoning_text',
+                    'argument_type', 'strength', 'sequence',
+                    'created_at', 'updated_at'}
+
+
+def test_argument_evidence_bridge(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(argument_evidence)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'argument_id', 'evidence_id', 'role',
+                    'display_order', 'notes', 'added_at'}
