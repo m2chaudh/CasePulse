@@ -23,7 +23,7 @@ def test_tray_marks_already_attached_results(page_test, tmp_db_with_case):
         source_table="emails", source_row_id=email_id,
     ))
     attach_evidence_to_argument(db, a.id, e.id, role=EvidenceRole.SUPPORTS)
-    at = page_test("pages/11_Case_Theory.py", default_timeout=30.0)
+    at = page_test("pages/1_Case_Theory.py", default_timeout=30.0)
     at.session_state.db = db
     at.session_state.case_theory_recent_argument_id = a.id
     at.session_state.tray_search_input = "banana"
@@ -48,7 +48,7 @@ def test_tray_renders_search_box(page_test, tmp_db_with_case):
         ('Custody hearing', 'Discussion about access', 'a@x', '<m1>', 'h1')
     """)
     conn.commit()
-    at = page_test("pages/11_Case_Theory.py")
+    at = page_test("pages/1_Case_Theory.py")
     at.session_state.db = db
     at.run()
     assert not at.exception

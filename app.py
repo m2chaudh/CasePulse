@@ -75,7 +75,7 @@ def main():
     if not is_setup_complete():
         st.markdown("## Welcome to CasePulse")
         st.info("Please complete the initial setup first.")
-        st.page_link("pages/0_Setup.py", label="Go to Setup", icon=None)
+        st.page_link("pages/13_Setup.py", label="Go to Setup", icon=None)
         st.stop()
         return
 
