@@ -356,7 +356,8 @@ class MicrosoftFetcher:
                     persist_metadata(self.db, md, source_table="attachments",
                                      source_row_id=attachment_id)
                     enqueue_job(self.db, job_type="ocr_attachment",
-                                payload={"attachment_id": attachment_id})
+                                payload={"source_table": "attachments",
+                                         "source_row_id": attachment_id})
                 count += 1
 
         return count

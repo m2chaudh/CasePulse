@@ -179,7 +179,14 @@ def enqueue_job(db: Database, *, job_type: str, payload: dict) -> int:
 
 
 def run_ocr_jobs(db: Database, max_jobs: int = 10) -> int:
-    """Drain up to *max_jobs* pending OCR jobs.  Returns number processed."""
+    """Drain up to *max_jobs* pending OCR jobs.  Returns number processed.
+
+    Payload format (new):
+        {"source_table": "attachments"|"documents", "source_row_id": <int>}
+
+    Legacy payload format (old — kept for in-flight jobs):
+        {"attachment_id": <int>}  → treated as source_table='attachments'
+    """
     from casepulse.case_theory.metadata_extractor import run_ocr_image
 
     conn = db._get_conn()
@@ -199,8 +206,16 @@ def run_ocr_jobs(db: Database, max_jobs: int = 10) -> int:
             payload = json.loads(details_str or "{}")
         except (json.JSONDecodeError, TypeError):
             payload = {}
-        att_id = payload.get("attachment_id")
-        if att_id is None:
+
+        # Resolve source_table / source_row_id (new format) with legacy fallback
+        source_table = payload.get("source_table")
+        source_row_id = payload.get("source_row_id")
+        if source_table is None and "attachment_id" in payload:
+            # Legacy format: attachment_id
+            source_table = "attachments"
+            source_row_id = payload["attachment_id"]
+
+        if source_table not in ("attachments", "documents") or source_row_id is None:
             cur.execute(
                 "UPDATE background_jobs SET status = 'failed' WHERE id = ?",
                 (job_id,),
@@ -208,7 +223,11 @@ def run_ocr_jobs(db: Database, max_jobs: int = 10) -> int:
             processed += 1
             continue
 
-        cur.execute("SELECT file_path FROM attachments WHERE id = ?", (att_id,))
+        if source_table == "attachments":
+            cur.execute("SELECT file_path FROM attachments WHERE id = ?", (source_row_id,))
+        else:
+            cur.execute("SELECT file_path FROM documents WHERE id = ?", (source_row_id,))
+
         row = cur.fetchone()
         if not row:
             cur.execute(
@@ -221,10 +240,17 @@ def run_ocr_jobs(db: Database, max_jobs: int = 10) -> int:
 
         text, conf = run_ocr_image(row[0])
         if text:
-            cur.execute(
-                "UPDATE attachments SET extracted_text = ? WHERE id = ?",
-                (text, att_id),
-            )
+            if source_table == "attachments":
+                cur.execute(
+                    "UPDATE attachments SET extracted_text = ? WHERE id = ?",
+                    (text, source_row_id),
+                )
+            else:
+                ocr_status = "done" if conf >= 0.6 else "needs_review"
+                cur.execute(
+                    "UPDATE documents SET extracted_text = ?, ocr_status = ? WHERE id = ?",
+                    (text, ocr_status, source_row_id),
+                )
             status = "completed" if conf >= 0.6 else "needs_review"
         else:
             status = "failed"
