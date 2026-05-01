@@ -281,9 +281,12 @@ class Database:
     """SQLite database wrapper for CasePulse."""
 
     def __init__(self, db_path: Optional[Path] = None):
+        if db_path is not None and not isinstance(db_path, Path):
+            db_path = Path(db_path)
         self.db_path = db_path or DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        self._init_schema()
+        self._run_migrations()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
@@ -292,9 +295,24 @@ class Database:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    def _init_db(self):
+    def _init_schema(self) -> None:
+        """Apply the base schema (CREATE TABLE IF NOT EXISTS). Idempotent."""
         with self._get_conn() as conn:
             conn.executescript(SCHEMA)
+
+    def _init_db(self):
+        self._init_schema()
+
+    def _run_migrations(self) -> None:
+        """Apply ALTER and one-time data migrations idempotently.
+
+        Each step checks for the change before applying. Safe to run on every
+        Database() construction.
+        """
+        conn = self._get_conn()
+        cur = conn.cursor()
+        # Migrations are appended below as Phase 1 progresses.
+        conn.commit()
 
     # ── Account operations ──
 
