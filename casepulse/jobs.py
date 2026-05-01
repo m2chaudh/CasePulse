@@ -155,3 +155,85 @@ def get_job_status(db: Database, job_id: int) -> Optional[dict]:
 def cancel_job(db: Database, job_id: int):
     """Cancel a running job. The thread checks this flag periodically."""
     db.cancel_job(job_id)
+
+
+# ── Background OCR jobs (Task 3.5) ──────────────────────────────────────────
+
+def enqueue_job(db: Database, *, job_type: str, payload: dict) -> int:
+    """Enqueue a background job with 'pending' status.
+
+    Payload is serialised as JSON into the ``details`` column (which is the
+    existing column used by all background_jobs rows).  Returns the new job ID.
+    """
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO background_jobs (job_type, status, details, started_at)
+        VALUES (?, 'pending', ?, datetime('now'))
+        """,
+        (job_type, json.dumps(payload)),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def run_ocr_jobs(db: Database, max_jobs: int = 10) -> int:
+    """Drain up to *max_jobs* pending OCR jobs.  Returns number processed."""
+    from casepulse.case_theory.metadata_extractor import run_ocr_image
+
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, details FROM background_jobs
+        WHERE job_type = 'ocr_attachment' AND status = 'pending'
+        LIMIT ?
+        """,
+        (max_jobs,),
+    )
+    jobs = cur.fetchall()
+    processed = 0
+    for job_id, details_str in jobs:
+        try:
+            payload = json.loads(details_str or "{}")
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        att_id = payload.get("attachment_id")
+        if att_id is None:
+            cur.execute(
+                "UPDATE background_jobs SET status = 'failed' WHERE id = ?",
+                (job_id,),
+            )
+            processed += 1
+            continue
+
+        cur.execute("SELECT file_path FROM attachments WHERE id = ?", (att_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.execute(
+                "UPDATE background_jobs SET status = 'failed', "
+                "completed_at = datetime('now') WHERE id = ?",
+                (job_id,),
+            )
+            processed += 1
+            continue
+
+        text, conf = run_ocr_image(row[0])
+        if text:
+            cur.execute(
+                "UPDATE attachments SET extracted_text = ? WHERE id = ?",
+                (text, att_id),
+            )
+            status = "completed" if conf >= 0.6 else "needs_review"
+        else:
+            status = "failed"
+        cur.execute(
+            "UPDATE background_jobs SET status = ?, completed_at = datetime('now') "
+            "WHERE id = ?",
+            (status, job_id),
+        )
+        processed += 1
+
+    conn.commit()
+    return processed
