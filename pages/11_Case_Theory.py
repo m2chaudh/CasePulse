@@ -14,7 +14,7 @@ from casepulse.config import Config
 from casepulse.case_theory.repository import (
     list_contradictions,
 )
-from casepulse.case_theory.ui import argument_editor
+from casepulse.case_theory.ui import argument_editor, contradiction_form
 from casepulse.legal.pin_lock import render_pin_gate
 
 st.set_page_config(page_title="Case Theory — CasePulse", layout="wide")
@@ -52,7 +52,10 @@ def main():
     if not contradictions:
         st.info("No contradictions yet for this case. Use the form below to "
                 "create one.")
-        # Stub: a simple "create contradiction" form will be added in Task 1.2.
+        new_id = contradiction_form.render(db, case_id=case_id)
+        if new_id:
+            st.success("Created — refresh to see it in the picker.")
+            st.rerun()
         st.stop()
         return
 
