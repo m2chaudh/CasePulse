@@ -274,6 +274,17 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_source ON chat_messages(source_type
 CREATE INDEX IF NOT EXISTS idx_evidence_tags_item ON evidence_tags(item_type, item_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_tags_case ON evidence_tags(case_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_item ON annotations(item_type, item_id);
+
+CREATE TABLE IF NOT EXISTS themes (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  display_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(case_id, title)
+);
+CREATE INDEX IF NOT EXISTS idx_themes_case ON themes(case_id);
 """
 
 
