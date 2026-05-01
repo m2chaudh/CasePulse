@@ -240,3 +240,81 @@ def list_allegations_for_contradiction(db: Database,
         claimed_date=r[4], source_evidence_id=r[5],
         status=AllegationStatus(r[6]), notes=r[7],
     ) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Argument CRUD
+# ---------------------------------------------------------------------------
+
+def create_argument(db: Database, a: Argument) -> Argument:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO arguments (contradiction_id, title, reasoning_text,
+                                argument_type, strength, sequence)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (a.contradiction_id, a.title, a.reasoning_text,
+          a.argument_type.value if a.argument_type else None,
+          a.strength.value if a.strength else None, a.sequence))
+    conn.commit()
+    a.id = cur.lastrowid
+    return a
+
+
+def get_argument(db: Database, arg_id: int) -> Optional[Argument]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, contradiction_id, title, reasoning_text, argument_type,
+               strength, sequence FROM arguments WHERE id = ?
+    """, (arg_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return Argument(
+        id=row[0], contradiction_id=row[1], title=row[2],
+        reasoning_text=row[3],
+        argument_type=ArgumentType(row[4]) if row[4] else None,
+        strength=Strength(row[5]) if row[5] else None,
+        sequence=row[6],
+    )
+
+
+def list_arguments_for_contradiction(db: Database,
+                                       contradiction_id: int) -> list[Argument]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, contradiction_id, title, reasoning_text, argument_type,
+               strength, sequence
+        FROM arguments WHERE contradiction_id = ?
+        ORDER BY sequence, id
+    """, (contradiction_id,))
+    return [Argument(
+        id=r[0], contradiction_id=r[1], title=r[2], reasoning_text=r[3],
+        argument_type=ArgumentType(r[4]) if r[4] else None,
+        strength=Strength(r[5]) if r[5] else None,
+        sequence=r[6],
+    ) for r in cur.fetchall()]
+
+
+def update_argument(db: Database, a: Argument) -> Argument:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE arguments SET title = ?, reasoning_text = ?,
+                              argument_type = ?, strength = ?, sequence = ?,
+                              updated_at = datetime('now')
+        WHERE id = ?
+    """, (a.title, a.reasoning_text,
+          a.argument_type.value if a.argument_type else None,
+          a.strength.value if a.strength else None, a.sequence, a.id))
+    conn.commit()
+    return a
+
+
+def delete_argument(db: Database, arg_id: int) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM arguments WHERE id = ?", (arg_id,))
+    conn.commit()
