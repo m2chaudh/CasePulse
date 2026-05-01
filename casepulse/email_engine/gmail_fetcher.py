@@ -476,7 +476,7 @@ class GmailFetcher:
             from casepulse.attachments.extractor import extract_text
             extracted_text = extract_text(str(file_path), content_type)
 
-            self.db.insert_attachment(
+            attachment_id = self.db.insert_attachment(
                 email_id=email_db_id,
                 filename=filename,
                 content_type=content_type,
@@ -485,6 +485,13 @@ class GmailFetcher:
                 extracted_text=extracted_text,
                 content_hash=content_hash,
             )
+            if content_type and content_type.startswith("image/"):
+                from casepulse.case_theory.metadata_extractor import (
+                    extract_image, persist_metadata,
+                )
+                md = extract_image(file_path)
+                persist_metadata(self.db, md, source_table="attachments",
+                                 source_row_id=attachment_id)
             count += 1
 
         return count
