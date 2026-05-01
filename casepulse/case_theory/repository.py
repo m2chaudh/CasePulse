@@ -326,12 +326,33 @@ def delete_argument(db: Database, arg_id: int) -> None:
 
 def _compute_source_hash(db: Database, source_table: str,
                           source_row_id: int) -> "str | None":
-    """Compute SHA-256 of the source row's primary text."""
+    """Compute SHA-256 of the source row's primary text.
+
+    For chat_messages the canonical formula is sha256(f"{timestamp}|{sender}|{message_text}")
+    — matching both the importer (casepulse/chat_engine/importer.py) and the migration
+    backfill in _run_migrations. This makes the hash collision-resistant even when multiple
+    senders send the same text in the same chat.
+
+    For all other source tables, sha256(primary_text_column) is used.
+    """
     conn = db._get_conn()
     cur = conn.cursor()
+
+    if source_table == "chat_messages":
+        cur.execute(
+            "SELECT timestamp, sender, message_text FROM chat_messages WHERE id = ?",
+            (source_row_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        ts, sender, text = row[0], row[1], row[2]
+        return hashlib.sha256(
+            f"{ts or ''}|{sender or ''}|{text or ''}".encode("utf-8")
+        ).hexdigest()
+
     text_cols = {
         "emails": "body_text",
-        "chat_messages": "message_text",
         "attachments": "extracted_text",
         "documents": "extracted_text",
         "annotations": "note_text",
