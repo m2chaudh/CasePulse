@@ -360,6 +360,41 @@ CREATE TABLE IF NOT EXISTS evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_source ON evidence(source_table, source_row_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_kind ON evidence(evidence_kind);
+
+CREATE TABLE IF NOT EXISTS photo_metadata (
+  id INTEGER PRIMARY KEY,
+  source_table TEXT NOT NULL,
+  source_row_id INTEGER NOT NULL,
+  taken_at TEXT,
+  camera_make TEXT,
+  camera_model TEXT,
+  lens TEXT,
+  software TEXT,
+  gps_lat REAL,
+  gps_lon REAL,
+  gps_accuracy REAL,
+  orientation INTEGER,
+  width INTEGER,
+  height INTEGER,
+  exif_present INTEGER DEFAULT 0,
+  detected_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(source_table, source_row_id)
+);
+CREATE INDEX IF NOT EXISTS idx_photo_metadata_source ON photo_metadata(source_table, source_row_id);
+CREATE INDEX IF NOT EXISTS idx_photo_metadata_taken ON photo_metadata(taken_at);
+
+CREATE TABLE IF NOT EXISTS metadata_attestations (
+  id INTEGER PRIMARY KEY,
+  photo_metadata_id INTEGER NOT NULL REFERENCES photo_metadata(id) ON DELETE CASCADE,
+  field_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT,
+  attestation_text TEXT,
+  attested_by TEXT,
+  attested_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_metadata_attestations_pm ON metadata_attestations(photo_metadata_id);
 """
 
 

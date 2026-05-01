@@ -85,3 +85,24 @@ def test_evidence_table(tmp_db):
     assert cols == {'id', 'evidence_kind', 'source_table', 'source_row_id',
                     'char_start', 'char_end', 'snippet', 'source_hash',
                     'created_at'}
+
+
+def test_photo_metadata_table(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(photo_metadata)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'id', 'source_table', 'source_row_id', 'taken_at',
+                    'camera_make', 'camera_model', 'lens', 'software',
+                    'gps_lat', 'gps_lon', 'gps_accuracy', 'orientation',
+                    'width', 'height', 'exif_present', 'detected_at'}
+
+
+def test_metadata_attestations_table(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(metadata_attestations)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'id', 'photo_metadata_id', 'field_name', 'status',
+                    'reason', 'attestation_text', 'attested_by',
+                    'attested_at', 'created_at'}
