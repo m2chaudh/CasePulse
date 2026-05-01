@@ -511,6 +511,57 @@ def list_recent_arguments_for_picker(db: Database, case_id: int,
 # Evidence snippet refinement
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Photo metadata attestations
+# ---------------------------------------------------------------------------
+
+def record_attestation(
+    db: Database, *,
+    photo_metadata_id: int,
+    field_name: str,
+    status: str,  # "struck" | "attested"
+    reason: "str | None" = None,
+    attestation_text: "str | None" = None,
+    attested_by: "str | None" = None,
+    attested_at: "str | None" = None,
+) -> int:
+    """Insert a metadata_attestations row. Returns the new row id."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO metadata_attestations
+        (photo_metadata_id, field_name, status, reason,
+         attestation_text, attested_by, attested_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (photo_metadata_id, field_name, status, reason,
+          attestation_text, attested_by, attested_at))
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_attestations_for_metadata(db: Database, *,
+                                    photo_metadata_id: int) -> list[dict]:
+    """Return all attestation rows for a photo_metadata record, ordered by creation time."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, photo_metadata_id, field_name, status, reason,
+               attestation_text, attested_by, attested_at, created_at
+        FROM metadata_attestations
+        WHERE photo_metadata_id = ?
+        ORDER BY created_at
+    """, (photo_metadata_id,))
+    return [{
+        "id": r[0], "photo_metadata_id": r[1], "field_name": r[2],
+        "status": r[3], "reason": r[4], "attestation_text": r[5],
+        "attested_by": r[6], "attested_at": r[7], "created_at": r[8],
+    } for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Evidence snippet refinement
+# ---------------------------------------------------------------------------
+
 def update_evidence_snippet(db: Database, evidence_id: int, *,
                              char_start: int | None = None,
                              char_end: int | None = None,
