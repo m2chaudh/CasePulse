@@ -427,3 +427,29 @@ def list_evidence_for_argument(db: Database,
             "notes": r[10],
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Evidence hash verification
+# ---------------------------------------------------------------------------
+
+def verify_evidence_hash(db: Database, evidence_id: int) -> bool:
+    """Re-compute source hash and compare to stored Evidence.source_hash.
+
+    Returns True if match (or if both None — nothing to compare),
+    False on mismatch.
+    """
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT source_table, source_row_id, source_hash FROM evidence
+        WHERE id = ?
+    """, (evidence_id,))
+    row = cur.fetchone()
+    if not row:
+        return False
+    source_table, source_row_id, stored_hash = row
+    fresh = _compute_source_hash(db, source_table, source_row_id)
+    if stored_hash is None and fresh is None:
+        return True
+    return stored_hash == fresh
