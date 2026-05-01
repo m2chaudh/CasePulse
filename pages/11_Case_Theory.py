@@ -14,6 +14,7 @@ from casepulse.config import Config
 from casepulse.case_theory.repository import (
     list_contradictions,
 )
+from casepulse.case_theory.ui import argument_editor
 from casepulse.legal.pin_lock import render_pin_gate
 
 st.set_page_config(page_title="Case Theory — CasePulse", layout="wide")
@@ -64,7 +65,7 @@ def main():
     left, right = st.columns([1, 1])
     with left:
         st.markdown(f"### Contradiction #{contradiction_id}")
-        st.write("[Argument editor lands in Task 1.2]")
+        argument_editor.render(db, contradiction_id=contradiction_id)
     with right:
         st.markdown("### Evidence Tray")
         st.write("[Tray search + result list lands in Task 1.4]")
