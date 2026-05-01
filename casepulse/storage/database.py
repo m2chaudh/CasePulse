@@ -507,6 +507,36 @@ CREATE TRIGGER IF NOT EXISTS annotations_au AFTER UPDATE ON annotations BEGIN
   INSERT INTO annotations_fts(rowid, note_text)
   VALUES (new.id, new.note_text);
 END;
+
+CREATE TABLE IF NOT EXISTS witnesses (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  relationship TEXT,
+  witness_type TEXT,
+  contact_info TEXT,
+  status TEXT DEFAULT 'initial',
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_witnesses_case ON witnesses(case_id);
+CREATE INDEX IF NOT EXISTS idx_witnesses_type ON witnesses(witness_type);
+CREATE INDEX IF NOT EXISTS idx_witnesses_status ON witnesses(status);
+
+CREATE TABLE IF NOT EXISTS witness_statements (
+  id INTEGER PRIMARY KEY,
+  witness_id INTEGER NOT NULL REFERENCES witnesses(id) ON DELETE CASCADE,
+  statement_text TEXT NOT NULL,
+  statement_date TEXT,
+  contradiction_id INTEGER REFERENCES contradictions(id) ON DELETE SET NULL,
+  argument_id INTEGER REFERENCES arguments(id) ON DELETE SET NULL,
+  status TEXT DEFAULT 'draft',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_witness_statements_witness ON witness_statements(witness_id);
+CREATE INDEX IF NOT EXISTS idx_witness_statements_contra ON witness_statements(contradiction_id);
+CREATE INDEX IF NOT EXISTS idx_witness_statements_arg ON witness_statements(argument_id);
 """
 
 
