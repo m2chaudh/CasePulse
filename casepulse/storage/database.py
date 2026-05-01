@@ -432,7 +432,15 @@ class Database:
         """
         conn = self._get_conn()
         cur = conn.cursor()
-        # Migrations are appended below as Phase 1 progresses.
+
+        # Task 1.9: audit_log hash chain columns
+        cur.execute("PRAGMA table_info(audit_log)")
+        audit_cols = {row[1] for row in cur.fetchall()}
+        if 'prev_hash' not in audit_cols:
+            cur.execute("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT")
+        if 'row_hash' not in audit_cols:
+            cur.execute("ALTER TABLE audit_log ADD COLUMN row_hash TEXT")
+
         conn.commit()
 
     # ── Account operations ──

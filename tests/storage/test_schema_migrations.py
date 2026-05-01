@@ -122,3 +122,12 @@ def test_cases_default_case_type_is_family(tmp_db):
     cur = conn.cursor()
     cur.execute("SELECT case_type FROM cases WHERE id = ?", (case_id,))
     assert cur.fetchone()[0] == 'family'
+
+
+def test_audit_log_has_hash_columns(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(audit_log)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert 'prev_hash' in cols
+    assert 'row_hash' in cols
