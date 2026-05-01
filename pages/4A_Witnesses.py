@@ -68,13 +68,17 @@ with left:
                 "Type",
                 options=[None] + list(WitnessType),
                 format_func=lambda x: "—" if x is None else x.value,
+                help="Character witnesses speak to the user's general truthfulness/character. "
+                     "Fact witnesses speak to specific events or statements they observed.",
             )
-            contact_info = st.text_area("Contact info", placeholder="phone, email, address (optional)")
+            contact_info = st.text_area("Contact info", placeholder="phone, email, address (optional)",
+                                        help="Phone, email, or address for this witness. Not shared outside this app.")
             status = st.selectbox(
                 "Status",
                 options=list(WitnessStatus),
                 format_func=lambda x: x.value,
                 index=0,
+                help="Track contact progress: initial → contacted → willing/hostile → subpoenaed.",
             )
             notes = st.text_area("Notes")
             if st.form_submit_button("Add witness") and name:
@@ -107,6 +111,8 @@ with right:
                 format_func=lambda x: "—" if x is None else x.value,
                 index=0 if w.witness_type is None else (list(WitnessType).index(w.witness_type) + 1),
                 key=f"wtype_{w.id}",
+                help="Character witnesses speak to the user's general truthfulness/character. "
+                     "Fact witnesses speak to specific events or statements they observed.",
             )
             new_contact = st.text_area("Contact info", value=w.contact_info or "", key=f"wcontact_{w.id}")
             new_status = st.selectbox(

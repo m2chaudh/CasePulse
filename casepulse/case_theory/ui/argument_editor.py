@@ -92,18 +92,32 @@ def render(db, *, contradiction_id: int) -> None:
 
     with st.expander("+ Add Argument"):
         with st.form(f"new_arg_{contradiction_id}"):
-            title = st.text_input("Title")
+            title = st.text_input(
+                "Title",
+                help="A short label for this argument, e.g. 'Alibi — was at work on March 14'. "
+                     "Appears as a heading in the brief.",
+            )
             arg_type = st.selectbox(
                 "Type",
                 options=[None] + list(ArgumentType),
                 format_func=lambda x: "—" if x is None else x.value,
+                help="Alibi: shows the user wasn't there. Self-contradiction: shows the opposing "
+                     "party's own statements conflict. Witness: a third party will testify. "
+                     "Documentary: a document refutes the claim. Timing: events couldn't have happened "
+                     "as alleged. Pattern: a pattern of similar false claims.",
             )
             strength = st.selectbox(
                 "Strength",
                 options=[None] + list(Strength),
                 format_func=lambda x: "—" if x is None else x.value,
+                help="Strong: bulletproof, leads at trial. Moderate: corroborating but not decisive. "
+                     "Circumstantial: supports a pattern but needs other arguments alongside.",
             )
-            reasoning = st.text_area("Reasoning")
+            reasoning = st.text_area(
+                "Reasoning",
+                help="Your analysis of why this argument holds. Keep it concise — "
+                     "this becomes a paragraph in the brief.",
+            )
             submit = st.form_submit_button("Add")
             if submit and title:
                 create_argument(db, Argument(

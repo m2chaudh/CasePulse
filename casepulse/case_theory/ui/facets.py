@@ -23,6 +23,7 @@ def render(*, key_prefix: str = "tray") -> TrayFacets:
         SOURCE_TYPES,
         default=None,
         key=f"{key_prefix}_source_types",
+        help="Restrict search to specific types: emails, chats, documents, attachments, annotations.",
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -30,17 +31,20 @@ def render(*, key_prefix: str = "tray") -> TrayFacets:
             "From",
             placeholder="2024-01-01",
             key=f"{key_prefix}_date_from",
+            help="ISO date (YYYY-MM-DD). Leave blank to search from the beginning of your data.",
         )
     with col2:
         date_to = st.text_input(
             "To",
             placeholder="2024-12-31",
             key=f"{key_prefix}_date_to",
+            help="ISO date (YYYY-MM-DD). Leave blank to search up to today.",
         )
     sender = st.text_input(
         "Sender contains",
         placeholder="email or name",
         key=f"{key_prefix}_sender",
+        help="Partial match against sender email or name. Case-insensitive.",
     )
     return TrayFacets(
         source_types=types or None,
