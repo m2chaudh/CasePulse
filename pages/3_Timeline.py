@@ -14,8 +14,38 @@ st.markdown("## Timeline")
 
 from components.page_init import init_page
 from casepulse.case_theory.ui import page_help
+from casepulse.case_theory.ui.source_row_card import format_one_line_meta
 db, config = init_page()
 page_help.render("timeline")
+
+
+def _enrich_item(item_type: str, item_id: int, db):
+    """Return (sender, recipients, chat_name, subject) from the source row."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    if item_type == "email":
+        cur.execute(
+            "SELECT sender_email, recipients, subject FROM emails WHERE id = ?",
+            (item_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None, [], None, None
+        recipients = []
+        try:
+            recipients = json.loads(row[1] or "[]")
+        except Exception:
+            recipients = []
+        return row[0], recipients, None, row[2]
+    if item_type == "chat":
+        cur.execute(
+            "SELECT sender, chat_name FROM chat_messages WHERE id = ?", (item_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None, [], None, None
+        return row[0], [], row[1], None
+    return None, [], None, None
 
 stats = db.get_stats()
 if stats["total_emails"] == 0 and stats.get("total_chat_messages", 0) == 0:
@@ -350,6 +380,16 @@ for item in page_items:
     header = f"{item_date} {item_time} | {dir_icon} {display} | {subject[:70]}{badges}{cat_badge}"
 
     with st.expander(header):
+        # ── Enriched metadata line (sender → recipients for emails, chat_name for chats) ──
+        _sender, _recipients, _chat_name, _subject = _enrich_item(item_type, item["id"], db)
+        st.caption(format_one_line_meta(
+            kind=item_type,
+            date=item_date,
+            sender=_sender,
+            recipients=_recipients,
+            chat_name=_chat_name,
+            subject=_subject or subject,
+        ))
         # ── Detail Panel ──
         if item_type == "email":
             email_data = db.get_email_by_id(item["id"])
