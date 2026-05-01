@@ -15,7 +15,9 @@ st.markdown("Scan your accounts to find all contacts, then select the ones relev
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("discover_senders")
 
 accounts = db.get_accounts()
 if not accounts:

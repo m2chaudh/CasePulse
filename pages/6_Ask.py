@@ -12,7 +12,9 @@ st.markdown("Query your emails with AI. Answers include exact citations — zero
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("ask")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []

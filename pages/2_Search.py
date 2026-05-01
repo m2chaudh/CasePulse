@@ -13,11 +13,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 st.set_page_config(page_title="Search — CasePulse", layout="wide")
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 from casepulse.search.retrieval import hybrid_search, SearchFacets
 from casepulse.case_theory.ui import facets as facets_mod
 from casepulse.case_theory.ui.source_row_card import format_one_line_meta
 
 db, config = init_page()
+page_help.render("search")
 
 st.markdown("## Search")
 st.markdown("Search across emails, chats, attachments, documents, and annotations.")

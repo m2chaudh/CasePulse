@@ -1,10 +1,12 @@
 """Witnesses — first-class people who can testify, distinct from Arguments."""
 import streamlit as st
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 
 st.set_page_config(page_title="Witnesses — CasePulse", layout="wide")
 
 db, config = init_page()
+page_help.render("witnesses")
 
 st.markdown("## Witnesses")
 st.markdown("Manage character witnesses and fact witnesses for your case. Each witness can have multiple statements linked to specific Contradictions or Arguments.")

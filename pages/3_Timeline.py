@@ -13,7 +13,9 @@ st.set_page_config(page_title="CasePulse - Timeline", page_icon="CP", layout="wi
 st.markdown("## Timeline")
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("timeline")
 
 stats = db.get_stats()
 if stats["total_emails"] == 0 and stats.get("total_chat_messages", 0) == 0:

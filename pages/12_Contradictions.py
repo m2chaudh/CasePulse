@@ -13,7 +13,9 @@ st.markdown("## Contradiction Analysis")
 st.markdown("Find inconsistencies, changing narratives, and contradictions across emails and chats.")
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("contradictions")
 
 from casepulse.storage.database import Database as _DB
 

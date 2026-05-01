@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from casepulse.storage.database import Database
 from casepulse.config import Config
 from casepulse.setup_wizard import is_setup_complete
+from casepulse.case_theory.ui import page_help
 
 st.set_page_config(
     page_title="CasePulse",
@@ -84,6 +85,8 @@ def main():
     if not render_pin_gate(db):
         st.stop()
         return
+
+    page_help.render("home")
 
     # Header
     st.markdown('<p class="main-header">CasePulse</p>', unsafe_allow_html=True)

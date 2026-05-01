@@ -13,7 +13,9 @@ st.markdown("Import WhatsApp exports, ChatVault HTML, PDF chat exports, and more
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("import_chats")
 
 # ── Import Methods ──
 tab1, tab2, tab3, tab4, tab5 = st.tabs([

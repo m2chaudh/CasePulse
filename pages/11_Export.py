@@ -13,7 +13,9 @@ st.markdown("## Export")
 st.markdown("Generate court-ready documents, timelines, and exhibit bundles.")
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("export")
 
 stats = db.get_stats()
 cases = db.get_cases()

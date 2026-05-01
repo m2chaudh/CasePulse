@@ -15,7 +15,9 @@ st.set_page_config(page_title="CasePulse - Cases", page_icon="CP", layout="wide"
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("cases")
 
 st.markdown("## Cases & Evidence Manager")
 

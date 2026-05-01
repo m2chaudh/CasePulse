@@ -16,6 +16,7 @@ from casepulse.case_theory.repository import (
 )
 from casepulse.case_theory.models import Evidence, EvidenceKind, EvidenceRole
 from casepulse.case_theory.ui import argument_editor, contradiction_form, evidence_tray
+from casepulse.case_theory.ui import page_help
 from casepulse.case_theory.ui.picker_state import get_recent_argument_id
 from casepulse.legal.pin_lock import render_pin_gate
 
@@ -35,6 +36,8 @@ def main():
     if not render_pin_gate(db):
         st.stop()
         return
+
+    page_help.render("case_theory")
 
     st.markdown("## Case Theory Workbench")
 
