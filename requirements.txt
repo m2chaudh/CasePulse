@@ -39,6 +39,6 @@ cryptography>=42.0.0
 # W1 Foundation: Case Theory Workbench
 dateparser>=1.2
 pytesseract>=0.3.10
-xray>=0.4
+x-ray>=0.3.6
 pydantic>=2.5
 weasyprint>=62.0
