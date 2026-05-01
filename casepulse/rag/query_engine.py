@@ -115,6 +115,80 @@ class QueryEngine:
             "chunks_used": len(hits),
         }
 
+    def query_structured(
+        self,
+        question: str,
+        top_k: int = 10,
+        sender_filter: Optional[str] = None,
+        date_start: Optional[str] = None,
+        date_end: Optional[str] = None,
+        db=None,
+    ) -> dict:
+        """Answer a question using hybrid retrieval and return structured Citations.
+
+        Returns:
+            {
+                "answer": str,
+                "citations": list[Citation],
+                "sources": [{"text", "metadata", "relevance_score"}],
+                "chunks_used": int,
+            }
+        """
+        from casepulse.search.retrieval import hybrid_search, SearchFacets
+        from casepulse.search.citation import Citation as _Citation
+
+        if db is None:
+            # Fall back to embedding-only path (legacy)
+            return self.query(question, top_k=top_k,
+                              sender_filter=sender_filter,
+                              date_start=date_start, date_end=date_end)
+
+        facets = SearchFacets(
+            sender=sender_filter,
+            date_from=date_start,
+            date_to=date_end,
+        )
+        hits = hybrid_search(db, question, facets=facets, k=top_k)
+
+        if not hits:
+            return {
+                "answer": "No relevant emails found for this query. Try broadening your search or ensure emails have been fetched and indexed.",
+                "citations": [],
+                "sources": [],
+                "chunks_used": 0,
+            }
+
+        citations = [h.citation for h in hits]
+        context_chunks = [h.citation.snippet or "" for h in hits if h.citation.snippet]
+
+        answer = self.llm.query(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=question,
+            context_chunks=context_chunks,
+        )
+
+        # Build legacy-compatible sources list from citations for history display
+        sources = [
+            {
+                "text": c.snippet or "",
+                "metadata": {
+                    "type": c.table.rstrip("s"),
+                    "sender": "",
+                    "date": "",
+                    "subject": c.snippet or "",
+                },
+                "relevance_score": h.score,
+            }
+            for c, h in zip(citations, hits)
+        ]
+
+        return {
+            "answer": answer,
+            "citations": citations,
+            "sources": sources,
+            "chunks_used": len(hits),
+        }
+
     def build_timeline(self, topic: str, top_k: int = 30) -> dict:
         """Build a chronological timeline for a topic.
 
