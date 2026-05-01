@@ -474,3 +474,20 @@ def verify_evidence_hash(db: Database, evidence_id: int) -> bool:
     if stored_hash is None and fresh is None:
         return True
     return stored_hash == fresh
+
+
+# ---------------------------------------------------------------------------
+# Evidence snippet refinement
+# ---------------------------------------------------------------------------
+
+def update_evidence_snippet(db: Database, evidence_id: int, *,
+                             char_start: int | None = None,
+                             char_end: int | None = None,
+                             snippet: str | None = None) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE evidence SET char_start = ?, char_end = ?, snippet = ?
+        WHERE id = ?
+    """, (char_start, char_end, snippet, evidence_id))
+    conn.commit()

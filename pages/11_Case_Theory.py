@@ -12,9 +12,11 @@ import streamlit as st
 from casepulse.storage.database import Database
 from casepulse.config import Config
 from casepulse.case_theory.repository import (
-    list_contradictions,
+    list_contradictions, create_evidence, attach_evidence_to_argument,
 )
-from casepulse.case_theory.ui import argument_editor, contradiction_form
+from casepulse.case_theory.models import Evidence, EvidenceKind, EvidenceRole
+from casepulse.case_theory.ui import argument_editor, contradiction_form, evidence_tray
+from casepulse.case_theory.ui.picker_state import get_recent_argument_id
 from casepulse.legal.pin_lock import render_pin_gate
 
 st.set_page_config(page_title="Case Theory — CasePulse", layout="wide")
@@ -64,14 +66,34 @@ def main():
     selected = st.sidebar.selectbox("Contradiction", list(contra_labels.keys()))
     contradiction_id = contra_labels[selected]
 
-    # Dual-pane layout (Tasks 1.2-1.6 will fill these in)
+    def _on_add(source_table: str, row_id: int) -> None:
+        arg_id = get_recent_argument_id(st.session_state)
+        if not arg_id:
+            st.warning("No active Argument — click 'Edit' on one first.")
+            return
+        kind_map = {
+            "emails": EvidenceKind.EMAIL,
+            "chat_messages": EvidenceKind.CHAT,
+            "attachments": EvidenceKind.ATTACHMENT,
+            "documents": EvidenceKind.DOCUMENT,
+            "annotations": EvidenceKind.EMAIL,  # fallback
+        }
+        e = create_evidence(db, Evidence(
+            evidence_kind=kind_map.get(source_table, EvidenceKind.EMAIL),
+            source_table=source_table,
+            source_row_id=row_id,
+        ))
+        attach_evidence_to_argument(db, arg_id, e.id, role=EvidenceRole.SUPPORTS)
+        st.toast(f"Attached to Argument #{arg_id}")
+        st.rerun()
+
+    # Dual-pane layout
     left, right = st.columns([1, 1])
     with left:
         st.markdown(f"### Contradiction #{contradiction_id}")
         argument_editor.render(db, contradiction_id=contradiction_id)
     with right:
-        st.markdown("### Evidence Tray")
-        st.write("[Tray search + result list lands in Task 1.4]")
+        evidence_tray.render(db, on_add=_on_add)
 
 
 if __name__ == "__main__":
