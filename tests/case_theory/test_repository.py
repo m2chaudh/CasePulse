@@ -1,6 +1,8 @@
-from casepulse.case_theory.models import Theme
+from casepulse.case_theory.models import Theme, Allegation, AllegationStatus
 from casepulse.case_theory.repository import (
     create_theme, get_theme, list_themes, update_theme, delete_theme,
+    create_allegation, get_allegation, list_allegations,
+    update_allegation, delete_allegation,
 )
 
 
@@ -35,3 +37,17 @@ def test_delete_theme(tmp_db_with_case):
     saved = create_theme(db, Theme(case_id=case_id, title="X"))
     delete_theme(db, saved.id)
     assert get_theme(db, saved.id) is None
+
+
+# ---------------------------------------------------------------------------
+# Allegation tests
+# ---------------------------------------------------------------------------
+
+def test_create_and_get_allegation(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    a = Allegation(case_id=case_id, title="X", claim_text="She said Y",
+                    claimed_date="2024-03-14")
+    saved = create_allegation(db, a)
+    got = get_allegation(db, saved.id)
+    assert got.claim_text == "She said Y"
+    assert got.status == AllegationStatus.ACTIVE
