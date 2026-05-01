@@ -50,7 +50,7 @@ def wait_for_server(port: int, timeout: float = 60.0) -> bool:
 def start_streamlit(port: int) -> subprocess.Popen:
     """Start Streamlit as a subprocess."""
     app_root = get_app_root()
-    app_path = str(app_root / "app.py")
+    app_path = str(app_root / "Home.py")
 
     env = os.environ.copy()
     env["CASEPULSE_DESKTOP"] = "1"
