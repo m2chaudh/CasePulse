@@ -63,9 +63,9 @@ st.markdown("### Configure")
 
 col1, col2 = st.columns(2)
 with col1:
-    export_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="exp_start")
+    export_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="exp_start", format="YYYY-MM-DD")
 with col2:
-    export_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="exp_end")
+    export_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="exp_end", format="YYYY-MM-DD")
 
 # Case selection (for exhibit references and evidence tags)
 selected_case_id = None

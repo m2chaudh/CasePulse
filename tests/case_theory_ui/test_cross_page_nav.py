@@ -3,12 +3,12 @@ import pytest
 
 
 @pytest.mark.parametrize("page", [
-    "pages/4_Timeline.py",
-    "pages/5_Ask.py",
-    "pages/8_Export.py",
-    "pages/9_Documents.py",
-    "pages/11_Case_Theory.py",
-    "pages/12_Search.py",
+    "pages/3_Timeline.py",
+    "pages/6_Ask.py",
+    "pages/11_Export.py",
+    "pages/5_Documents.py",
+    "pages/1_Case_Theory.py",
+    "pages/2_Search.py",
 ])
 def test_page_loads_without_error(page, page_test, tmp_db_with_case):
     db, case_id = tmp_db_with_case

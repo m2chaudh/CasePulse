@@ -81,8 +81,23 @@ def save_installed_modules(modules: dict[str, bool]) -> None:
 
 
 def is_setup_complete() -> bool:
-    """Check if first-run setup has been completed."""
-    return get_modules_path().exists()
+    """Check if first-run setup has been completed.
+
+    Setup is considered complete if EITHER the modules.json was written
+    via the Setup wizard, OR the user has already connected an account
+    (existing users from before the Setup wizard existed shouldn't be
+    forced through it).
+    """
+    if get_modules_path().exists():
+        return True
+    # Existing users: any connected account = setup is implicitly complete
+    try:
+        from casepulse.storage.database import Database
+        db = Database()
+        accounts = db.get_accounts()
+        return bool(accounts)
+    except Exception:
+        return False
 
 
 def is_module_enabled(module_key: str) -> bool:

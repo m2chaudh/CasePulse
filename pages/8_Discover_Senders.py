@@ -30,12 +30,14 @@ with col1:
         "From",
         value=date.fromisoformat(config.date_start),
         key="scan_start",
+        format="YYYY-MM-DD",
     )
 with col2:
     scan_end = st.date_input(
         "To",
         value=date.fromisoformat(config.date_end),
         key="scan_end",
+        format="YYYY-MM-DD",
     )
 
 # ── Account Selection ──

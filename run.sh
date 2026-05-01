@@ -21,4 +21,4 @@ mkdir -p data/{tokens,attachments,db,chroma}
 
 # Launch Streamlit
 echo "Starting CasePulse..."
-streamlit run app.py --server.port 8501 --browser.gatherUsageStats false
+streamlit run Home.py --server.port 8501 --browser.gatherUsageStats false

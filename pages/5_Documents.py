@@ -59,9 +59,16 @@ def _photo_metadata_for(db, source_table: str, source_row_id: int):
     }
 
 
-tab_import, tab_docs, tab_timeline, tab_add = st.tabs([
-    "Import Documents", "Document Library", "Timeline Events", "Add Event"
-])
+# Default to Library tab when documents exist; Import otherwise
+_doc_count = len(db.get_documents()) if hasattr(db, "get_documents") else 0
+if _doc_count > 0:
+    tab_docs, tab_import, tab_timeline, tab_add = st.tabs([
+        "Document Library", "Import Documents", "Timeline Events", "Add Event"
+    ])
+else:
+    tab_import, tab_docs, tab_timeline, tab_add = st.tabs([
+        "Import Documents", "Document Library", "Timeline Events", "Add Event"
+    ])
 
 # ══════════════════════════════════════════════════════
 # TAB 1: Import Documents
@@ -283,31 +290,41 @@ with tab_docs:
                              or search_lower in (d.get("extracted_text") or "").lower()]
 
         for doc in filtered_docs:
-            with st.expander(f"{doc['filename']} ({doc['ocr_status']}) — {doc['size_bytes'] // 1024} KB"):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.caption(f"Path: {doc['file_path']}")
-                    st.caption(f"Type: {doc['content_type']} | Hash: {doc['content_hash'][:16]}...")
+            # ── Status badge ──────────────────────────────────────────────
+            _ocr = doc.get("ocr_status", "")
+            if _ocr == "done":
+                _badge = "✓"
+            elif _ocr in ("needs_review", "needs_ocr"):
+                _badge = "⚠"
+            else:
+                _badge = ""
+            # ── Date display ──────────────────────────────────────────────
+            _display_date = doc.get("timeline_date") or doc.get("created_at", "")
+            if _display_date and len(_display_date) > 10:
+                _display_date = _display_date[:10]
 
-                    # Show extracted text
-                    if doc.get("extracted_text"):
-                        st.text_area("Extracted text", doc["extracted_text"][:3000],
-                                     height=150, disabled=True, key=f"doctext_{doc['id']}",
-                                     label_visibility="collapsed")
+            # ── Compact row header ────────────────────────────────────────
+            _header = f"**{doc['filename']}**"
+            if _display_date:
+                _header += f"  ·  {_display_date}"
+            if _badge:
+                _header += f"  {_badge}"
 
-                    # Date extraction
-                    if doc.get("extracted_text"):
-                        from casepulse.export.document_import import extract_dates_from_text
-                        dates = extract_dates_from_text(doc["extracted_text"])
-                        if dates:
-                            st.markdown(f"**Dates found ({len(dates)}):**")
-                            for d in dates[:10]:
-                                st.caption(f"  {d['date']} — {d['context'][:100]}")
+            with st.container():
+                col_main, col_actions = st.columns([4, 1])
+                with col_main:
+                    st.markdown(_header)
+                    # Thumbnail for image files
+                    _ctype = doc.get("content_type") or ""
+                    if _ctype.startswith("image/"):
+                        _fpath = doc.get("file_path", "")
+                        if _fpath and Path(_fpath).exists():
+                            st.image(_fpath, width=120)
 
-                with col2:
+                with col_actions:
                     # Manual timeline date
                     tl_date = st.date_input("Timeline date", value=None,
-                                             key=f"doc_tl_date_{doc['id']}")
+                                             key=f"doc_tl_date_{doc['id']}", format="YYYY-MM-DD")
                     if tl_date:
                         db.update_document(doc["id"], timeline_date=str(tl_date))
 
@@ -324,20 +341,47 @@ with tab_docs:
                         else:
                             st.info("No active case — create one in the Cases page first.")
 
+                    # View as exhibit (stub)
+                    if st.button("View as exhibit", key=f"exhibit_{doc['id']}"):
+                        st.info("Exhibit preview coming in a future release.")
+
                     if st.button("Delete", key=f"del_doc_{doc['id']}"):
                         db.delete_document(doc["id"])
                         st.rerun()
 
-                # Photo metadata attestation form (Task 4.2)
-                pm = _photo_metadata_for(db, "documents", doc["id"])
-                if pm:
-                    with st.expander("Photo metadata"):
-                        from casepulse.case_theory.ui import attestation_form
-                        attestation_form.render(
-                            db,
-                            photo_metadata_id=pm["id"],
-                            photo_metadata=pm,
-                        )
+                # ── Details expander (collapsed by default) ───────────────
+                with st.expander("Details"):
+                    st.caption(f"Path: {doc['file_path']}")
+                    st.caption(f"Type: {doc.get('content_type', '—')} | Size: {doc['size_bytes'] // 1024} KB")
+                    st.caption(f"OCR status: {_ocr} | Hash: {doc['content_hash'][:16]}...")
+
+                    # Show extracted text
+                    if doc.get("extracted_text"):
+                        st.text_area("Extracted text", doc["extracted_text"][:3000],
+                                     height=150, disabled=True, key=f"doctext_{doc['id']}",
+                                     label_visibility="collapsed")
+
+                    # Date extraction
+                    if doc.get("extracted_text"):
+                        from casepulse.export.document_import import extract_dates_from_text
+                        dates = extract_dates_from_text(doc["extracted_text"])
+                        if dates:
+                            st.markdown(f"**Dates found ({len(dates)}):**")
+                            for d in dates[:10]:
+                                st.caption(f"  {d['date']} — {d['context'][:100]}")
+
+                    # Photo metadata attestation form
+                    pm = _photo_metadata_for(db, "documents", doc["id"])
+                    if pm:
+                        with st.expander("Photo metadata"):
+                            from casepulse.case_theory.ui import attestation_form
+                            attestation_form.render(
+                                db,
+                                photo_metadata_id=pm["id"],
+                                photo_metadata=pm,
+                            )
+
+                st.divider()
 
 # ══════════════════════════════════════════════════════
 # TAB 3: Timeline Events
@@ -349,9 +393,9 @@ with tab_timeline:
     # Filters
     col1, col2, col3 = st.columns(3)
     with col1:
-        tl_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="tl_ev_start")
+        tl_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="tl_ev_start", format="YYYY-MM-DD")
     with col2:
-        tl_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="tl_ev_end")
+        tl_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="tl_ev_end", format="YYYY-MM-DD")
     with col3:
         tl_cat = st.selectbox("Category", [
             "All", "relationship", "communication", "incident", "legal",
@@ -422,7 +466,7 @@ with tab_add:
     with st.form("add_event_form", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            ev_date = st.date_input("Date", key="ev_add_date")
+            ev_date = st.date_input("Date", key="ev_add_date", format="YYYY-MM-DD")
         with col2:
             ev_time = st.text_input("Time (optional)", placeholder="14:30", key="ev_add_time")
         with col3:

@@ -104,7 +104,7 @@ hidden_imports = [
 
 # Data files — app source that Streamlit needs at runtime
 app_datas = [
-    ("app.py", "."),
+    ("Home.py", "."),
     ("pages", "pages"),
     ("casepulse", "casepulse"),
     ("components", "components"),
