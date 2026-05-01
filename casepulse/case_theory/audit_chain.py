@@ -19,7 +19,10 @@ def _canonicalize(row_data: dict) -> bytes:
 def get_last_hash(db: Database) -> Optional[str]:
     conn = db._get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT row_hash FROM audit_log ORDER BY id DESC LIMIT 1")
+    cur.execute(
+        "SELECT row_hash FROM audit_log WHERE row_hash IS NOT NULL "
+        "ORDER BY id DESC LIMIT 1"
+    )
     row = cur.fetchone()
     return row[0] if row else None
 

@@ -50,3 +50,27 @@ def test_verify_chain_skips_pre_w1_legacy_rows(tmp_db):
     log_chained(tmp_db, action="post_w1", details={"id": 1})
     # Chain verification should pass — legacy row is skipped
     assert verify_chain(tmp_db) is True
+
+
+def test_chain_survives_legacy_interleaving(tmp_db):
+    """Chain remains valid when legacy db.log_action rows are interleaved.
+
+    Sequence: chained row → raw INSERT (no row_hash) → chained row.
+    The second chained row must link to the first chained row, not the
+    legacy row whose row_hash is NULL.
+    """
+    # First chained row
+    log_chained(tmp_db, action="first", details={"x": 1})
+
+    # Legacy raw insert (simulates db.log_action — no row_hash column)
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO audit_log (action, details) VALUES ('legacy', 'plain text')"
+    )
+    conn.commit()
+
+    # Second chained row — must pick up hash from first chained row, not NULL
+    log_chained(tmp_db, action="second", details={"x": 2})
+
+    assert verify_chain(tmp_db) is True
