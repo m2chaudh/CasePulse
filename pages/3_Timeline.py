@@ -26,9 +26,9 @@ if stats["total_emails"] == 0 and stats.get("total_chat_messages", 0) == 0:
 with st.container():
     col1, col2, col3 = st.columns(3)
     with col1:
-        filter_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="tl_start")
+        filter_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="tl_start", format="YYYY-MM-DD")
     with col2:
-        filter_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="tl_end")
+        filter_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="tl_end", format="YYYY-MM-DD")
     with col3:
         filter_keyword = st.text_input("Search", placeholder="Search subject/content...", key="tl_search")
 

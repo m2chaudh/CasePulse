@@ -307,7 +307,7 @@ with tab_docs:
                 with col2:
                     # Manual timeline date
                     tl_date = st.date_input("Timeline date", value=None,
-                                             key=f"doc_tl_date_{doc['id']}")
+                                             key=f"doc_tl_date_{doc['id']}", format="YYYY-MM-DD")
                     if tl_date:
                         db.update_document(doc["id"], timeline_date=str(tl_date))
 
@@ -349,9 +349,9 @@ with tab_timeline:
     # Filters
     col1, col2, col3 = st.columns(3)
     with col1:
-        tl_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="tl_ev_start")
+        tl_start = st.date_input("From", value=date.fromisoformat(config.date_start), key="tl_ev_start", format="YYYY-MM-DD")
     with col2:
-        tl_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="tl_ev_end")
+        tl_end = st.date_input("To", value=date.fromisoformat(config.date_end), key="tl_ev_end", format="YYYY-MM-DD")
     with col3:
         tl_cat = st.selectbox("Category", [
             "All", "relationship", "communication", "incident", "legal",
@@ -422,7 +422,7 @@ with tab_add:
     with st.form("add_event_form", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            ev_date = st.date_input("Date", key="ev_add_date")
+            ev_date = st.date_input("Date", key="ev_add_date", format="YYYY-MM-DD")
         with col2:
             ev_time = st.text_input("Time (optional)", placeholder="14:30", key="ev_add_time")
         with col3:
