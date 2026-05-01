@@ -441,6 +441,13 @@ class Database:
         if 'row_hash' not in audit_cols:
             cur.execute("ALTER TABLE audit_log ADD COLUMN row_hash TEXT")
 
+        # Task 1.10: backfill chat_messages.content_hash for legacy rows
+        cur.execute("SELECT id, message_text FROM chat_messages WHERE content_hash IS NULL")
+        rows = cur.fetchall()
+        for row_id, text in rows:
+            h = hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+            cur.execute("UPDATE chat_messages SET content_hash = ? WHERE id = ?", (h, row_id))
+
         conn.commit()
 
     # ── Account operations ──
