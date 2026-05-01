@@ -274,6 +274,239 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_source ON chat_messages(source_type
 CREATE INDEX IF NOT EXISTS idx_evidence_tags_item ON evidence_tags(item_type, item_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_tags_case ON evidence_tags(case_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_item ON annotations(item_type, item_id);
+
+CREATE TABLE IF NOT EXISTS themes (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  display_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(case_id, title)
+);
+CREATE INDEX IF NOT EXISTS idx_themes_case ON themes(case_id);
+
+CREATE TABLE IF NOT EXISTS allegations (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  claim_text TEXT NOT NULL,
+  claimed_date TEXT,
+  source_evidence_id INTEGER REFERENCES evidence(id),
+  status TEXT DEFAULT 'active',
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_allegations_case ON allegations(case_id);
+CREATE INDEX IF NOT EXISTS idx_allegations_date ON allegations(claimed_date);
+
+CREATE TABLE IF NOT EXISTS contradictions (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  headline TEXT NOT NULL,
+  status TEXT DEFAULT 'draft',
+  theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL,
+  display_order INTEGER DEFAULT 0,
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_contradictions_case ON contradictions(case_id);
+CREATE INDEX IF NOT EXISTS idx_contradictions_status ON contradictions(status);
+CREATE INDEX IF NOT EXISTS idx_contradictions_theme ON contradictions(theme_id);
+
+CREATE TABLE IF NOT EXISTS contradiction_allegations (
+  contradiction_id INTEGER NOT NULL REFERENCES contradictions(id) ON DELETE CASCADE,
+  allegation_id INTEGER NOT NULL REFERENCES allegations(id) ON DELETE CASCADE,
+  PRIMARY KEY (contradiction_id, allegation_id)
+);
+
+CREATE TABLE IF NOT EXISTS arguments (
+  id INTEGER PRIMARY KEY,
+  contradiction_id INTEGER NOT NULL REFERENCES contradictions(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  reasoning_text TEXT,
+  argument_type TEXT,
+  strength TEXT,
+  sequence INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_arguments_contradiction ON arguments(contradiction_id);
+CREATE INDEX IF NOT EXISTS idx_arguments_type ON arguments(argument_type);
+CREATE INDEX IF NOT EXISTS idx_arguments_strength ON arguments(strength);
+
+CREATE TABLE IF NOT EXISTS argument_evidence (
+  argument_id INTEGER NOT NULL REFERENCES arguments(id) ON DELETE CASCADE,
+  evidence_id INTEGER NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+  role TEXT DEFAULT 'supports',
+  display_order INTEGER DEFAULT 0,
+  notes TEXT,
+  added_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (argument_id, evidence_id)
+);
+
+CREATE TABLE IF NOT EXISTS evidence (
+  id INTEGER PRIMARY KEY,
+  evidence_kind TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  source_row_id INTEGER NOT NULL,
+  char_start INTEGER,
+  char_end INTEGER,
+  snippet TEXT,
+  source_hash TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(source_table, source_row_id, char_start, char_end)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_source ON evidence(source_table, source_row_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_kind ON evidence(evidence_kind);
+
+CREATE TABLE IF NOT EXISTS photo_metadata (
+  id INTEGER PRIMARY KEY,
+  source_table TEXT NOT NULL,
+  source_row_id INTEGER NOT NULL,
+  taken_at TEXT,
+  camera_make TEXT,
+  camera_model TEXT,
+  lens TEXT,
+  software TEXT,
+  gps_lat REAL,
+  gps_lon REAL,
+  gps_accuracy REAL,
+  orientation INTEGER,
+  width INTEGER,
+  height INTEGER,
+  exif_present INTEGER DEFAULT 0,
+  detected_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(source_table, source_row_id)
+);
+CREATE INDEX IF NOT EXISTS idx_photo_metadata_source ON photo_metadata(source_table, source_row_id);
+CREATE INDEX IF NOT EXISTS idx_photo_metadata_taken ON photo_metadata(taken_at);
+
+CREATE TABLE IF NOT EXISTS metadata_attestations (
+  id INTEGER PRIMARY KEY,
+  photo_metadata_id INTEGER NOT NULL REFERENCES photo_metadata(id) ON DELETE CASCADE,
+  field_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT,
+  attestation_text TEXT,
+  attested_by TEXT,
+  attested_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_metadata_attestations_pm ON metadata_attestations(photo_metadata_id);
+
+-- ── FTS5 virtual tables (Task 2.1 + 2.2) ──
+
+CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(
+  subject, body_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS emails_ai AFTER INSERT ON emails BEGIN
+  INSERT INTO emails_fts(rowid, subject, body_text)
+  VALUES (new.id, new.subject, new.body_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS emails_ad AFTER DELETE ON emails BEGIN
+  INSERT INTO emails_fts(emails_fts, rowid, subject, body_text)
+  VALUES('delete', old.id, old.subject, old.body_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS emails_au AFTER UPDATE ON emails BEGIN
+  INSERT INTO emails_fts(emails_fts, rowid, subject, body_text)
+  VALUES('delete', old.id, old.subject, old.body_text);
+  INSERT INTO emails_fts(rowid, subject, body_text)
+  VALUES (new.id, new.subject, new.body_text);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(
+  message_text, sender, chat_name,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(rowid, message_text, sender, chat_name)
+  VALUES (new.id, new.message_text, new.sender, new.chat_name);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(chat_messages_fts, rowid, message_text, sender, chat_name)
+  VALUES('delete', old.id, old.message_text, old.sender, old.chat_name);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_messages_au AFTER UPDATE ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(chat_messages_fts, rowid, message_text, sender, chat_name)
+  VALUES('delete', old.id, old.message_text, old.sender, old.chat_name);
+  INSERT INTO chat_messages_fts(rowid, message_text, sender, chat_name)
+  VALUES (new.id, new.message_text, new.sender, new.chat_name);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS attachments_fts USING fts5(
+  filename, extracted_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS attachments_ai AFTER INSERT ON attachments BEGIN
+  INSERT INTO attachments_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_ad AFTER DELETE ON attachments BEGIN
+  INSERT INTO attachments_fts(attachments_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_au AFTER UPDATE ON attachments BEGIN
+  INSERT INTO attachments_fts(attachments_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+  INSERT INTO attachments_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+  filename, extracted_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+  INSERT INTO documents_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, filename, extracted_text)
+  VALUES('delete', old.id, old.filename, old.extracted_text);
+  INSERT INTO documents_fts(rowid, filename, extracted_text)
+  VALUES (new.id, new.filename, new.extracted_text);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS annotations_fts USING fts5(
+  note_text,
+  content='', tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS annotations_ai AFTER INSERT ON annotations BEGIN
+  INSERT INTO annotations_fts(rowid, note_text)
+  VALUES (new.id, new.note_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS annotations_ad AFTER DELETE ON annotations BEGIN
+  INSERT INTO annotations_fts(annotations_fts, rowid, note_text)
+  VALUES('delete', old.id, old.note_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS annotations_au AFTER UPDATE ON annotations BEGIN
+  INSERT INTO annotations_fts(annotations_fts, rowid, note_text)
+  VALUES('delete', old.id, old.note_text);
+  INSERT INTO annotations_fts(rowid, note_text)
+  VALUES (new.id, new.note_text);
+END;
 """
 
 
@@ -281,9 +514,12 @@ class Database:
     """SQLite database wrapper for CasePulse."""
 
     def __init__(self, db_path: Optional[Path] = None):
+        if db_path is not None and not isinstance(db_path, Path):
+            db_path = Path(db_path)
         self.db_path = db_path or DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        self._init_schema()
+        self._run_migrations()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
@@ -292,9 +528,71 @@ class Database:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    def _init_db(self):
+    def _init_schema(self) -> None:
+        """Apply the base schema (CREATE TABLE IF NOT EXISTS). Idempotent."""
         with self._get_conn() as conn:
             conn.executescript(SCHEMA)
+
+    def _init_db(self):
+        self._init_schema()
+
+    def _run_migrations(self) -> None:
+        """Apply ALTER and one-time data migrations idempotently.
+
+        Each step checks for the change before applying. Safe to run on every
+        Database() construction.
+        """
+        conn = self._get_conn()
+        cur = conn.cursor()
+
+        # Task 1.9: audit_log hash chain columns
+        cur.execute("PRAGMA table_info(audit_log)")
+        audit_cols = {row[1] for row in cur.fetchall()}
+        if 'prev_hash' not in audit_cols:
+            cur.execute("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT")
+        if 'row_hash' not in audit_cols:
+            cur.execute("ALTER TABLE audit_log ADD COLUMN row_hash TEXT")
+
+        # Task 1.10: backfill chat_messages.content_hash for legacy rows
+        # Canonical formula: sha256(f"{timestamp}|{sender}|{message_text}")
+        cur.execute(
+            "SELECT id, message_text, sender, timestamp FROM chat_messages "
+            "WHERE content_hash IS NULL"
+        )
+        rows = cur.fetchall()
+        for row_id, text, sender, ts in rows:
+            h = hashlib.sha256(
+                f"{ts or ''}|{sender or ''}|{text or ''}".encode("utf-8")
+            ).hexdigest()
+            cur.execute("UPDATE chat_messages SET content_hash = ? WHERE id = ?", (h, row_id))
+
+        # Task 2.3: backfill FTS5 indices for pre-existing rows
+        self._backfill_fts_if_empty(cur, "emails_fts", "emails",
+                                     ["subject", "body_text"])
+        self._backfill_fts_if_empty(cur, "chat_messages_fts", "chat_messages",
+                                     ["message_text", "sender", "chat_name"])
+        self._backfill_fts_if_empty(cur, "attachments_fts", "attachments",
+                                     ["filename", "extracted_text"])
+        self._backfill_fts_if_empty(cur, "documents_fts", "documents",
+                                     ["filename", "extracted_text"])
+        self._backfill_fts_if_empty(cur, "annotations_fts", "annotations",
+                                     ["note_text"])
+
+        conn.commit()
+
+    def _backfill_fts_if_empty(self, cur, fts_table: str, source_table: str,
+                                select_cols: list) -> None:
+        """Backfill an FTS5 contentless table from its source table if under-indexed."""
+        cur.execute(f"SELECT COUNT(*) FROM {fts_table}")
+        fts_count = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM {source_table}")
+        source_count = cur.fetchone()[0]
+        if fts_count < source_count:
+            col_list = ", ".join(select_cols)
+            cur.execute(
+                f"INSERT INTO {fts_table}(rowid, {col_list}) "
+                f"SELECT id, {col_list} FROM {source_table}"
+            )
 
     # ── Account operations ──
 
@@ -1003,7 +1301,7 @@ class Database:
 
     # ── Case operations ──
 
-    def create_case(self, name: str, case_type: str, case_number: str = "",
+    def create_case(self, name: str, case_type: str = 'family', case_number: str = "",
                     description: str = "", exhibit_format: str = "alpha",
                     exhibit_prefix: str = "") -> int:
         with self._get_conn() as conn:

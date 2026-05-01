@@ -155,3 +155,111 @@ def get_job_status(db: Database, job_id: int) -> Optional[dict]:
 def cancel_job(db: Database, job_id: int):
     """Cancel a running job. The thread checks this flag periodically."""
     db.cancel_job(job_id)
+
+
+# ── Background OCR jobs (Task 3.5) ──────────────────────────────────────────
+
+def enqueue_job(db: Database, *, job_type: str, payload: dict) -> int:
+    """Enqueue a background job with 'pending' status.
+
+    Payload is serialised as JSON into the ``details`` column (which is the
+    existing column used by all background_jobs rows).  Returns the new job ID.
+    """
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO background_jobs (job_type, status, details, started_at)
+        VALUES (?, 'pending', ?, datetime('now'))
+        """,
+        (job_type, json.dumps(payload)),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def run_ocr_jobs(db: Database, max_jobs: int = 10) -> int:
+    """Drain up to *max_jobs* pending OCR jobs.  Returns number processed.
+
+    Payload format (new):
+        {"source_table": "attachments"|"documents", "source_row_id": <int>}
+
+    Legacy payload format (old — kept for in-flight jobs):
+        {"attachment_id": <int>}  → treated as source_table='attachments'
+    """
+    from casepulse.case_theory.metadata_extractor import run_ocr_image
+
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, details FROM background_jobs
+        WHERE job_type = 'ocr_attachment' AND status = 'pending'
+        LIMIT ?
+        """,
+        (max_jobs,),
+    )
+    jobs = cur.fetchall()
+    processed = 0
+    for job_id, details_str in jobs:
+        try:
+            payload = json.loads(details_str or "{}")
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+
+        # Resolve source_table / source_row_id (new format) with legacy fallback
+        source_table = payload.get("source_table")
+        source_row_id = payload.get("source_row_id")
+        if source_table is None and "attachment_id" in payload:
+            # Legacy format: attachment_id
+            source_table = "attachments"
+            source_row_id = payload["attachment_id"]
+
+        if source_table not in ("attachments", "documents") or source_row_id is None:
+            cur.execute(
+                "UPDATE background_jobs SET status = 'failed' WHERE id = ?",
+                (job_id,),
+            )
+            processed += 1
+            continue
+
+        if source_table == "attachments":
+            cur.execute("SELECT file_path FROM attachments WHERE id = ?", (source_row_id,))
+        else:
+            cur.execute("SELECT file_path FROM documents WHERE id = ?", (source_row_id,))
+
+        row = cur.fetchone()
+        if not row:
+            cur.execute(
+                "UPDATE background_jobs SET status = 'failed', "
+                "completed_at = datetime('now') WHERE id = ?",
+                (job_id,),
+            )
+            processed += 1
+            continue
+
+        text, conf = run_ocr_image(row[0])
+        if text:
+            if source_table == "attachments":
+                cur.execute(
+                    "UPDATE attachments SET extracted_text = ? WHERE id = ?",
+                    (text, source_row_id),
+                )
+            else:
+                ocr_status = "done" if conf >= 0.6 else "needs_review"
+                cur.execute(
+                    "UPDATE documents SET extracted_text = ?, ocr_status = ? WHERE id = ?",
+                    (text, ocr_status, source_row_id),
+                )
+            status = "completed" if conf >= 0.6 else "needs_review"
+        else:
+            status = "failed"
+        cur.execute(
+            "UPDATE background_jobs SET status = ?, completed_at = datetime('now') "
+            "WHERE id = ?",
+            (status, job_id),
+        )
+        processed += 1
+
+    conn.commit()
+    return processed

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from casepulse.storage.database import Database
 
@@ -222,6 +222,10 @@ def _build_chat_chunk(messages: list[dict], chunk_index: int) -> Optional[dict]:
     body = "\n".join(lines)
     senders = list(set(m.get("sender", "") for m in messages if m.get("sender")))
 
+    # Collect message IDs for per-message citation in search results.
+    # ChromaDB metadata values must be scalars, so we JSON-encode the list.
+    msg_ids = [m["id"] for m in messages if m.get("id") is not None]
+
     return {
         "text": header + body,
         "metadata": {
@@ -233,14 +237,44 @@ def _build_chat_chunk(messages: list[dict], chunk_index: int) -> Optional[dict]:
             "date_end": last_ts[:10] if last_ts else "",
             "subject": chat_name,
             "chunk_index": chunk_index,
+            "chat_message_ids": json.dumps(msg_ids),
+            "first_chat_message_id": msg_ids[0] if msg_ids else None,
         },
     }
+
+
+def chunk_document(doc: dict, chunk_size: int = 500,
+                   overlap: int = 50) -> list[dict]:
+    """Chunk a documents-table row into RAG chunks with metadata."""
+    text = doc.get("extracted_text", "") or ""
+    if not text:
+        return []
+    words = text.split()
+    chunks = []
+    i = 0
+    chunk_idx = 0
+    while i < len(words):
+        chunk_words = words[i:i + chunk_size]
+        body = " ".join(chunk_words)
+        header = f"Document: {doc.get('filename', 'unknown')}\n"
+        chunks.append({
+            "text": header + body,
+            "metadata": {
+                "document_id": doc["id"],
+                "filename": doc.get("filename"),
+                "type": "document",
+                "chunk_index": chunk_idx,
+            },
+        })
+        i += chunk_size - overlap
+        chunk_idx += 1
+    return chunks
 
 
 def build_all_chunks(db: Database, chunk_size: int = 500,
                      chunk_overlap: int = 50,
                      progress_cb=None) -> list[dict]:
-    """Build chunks from all emails, attachments, AND chat messages."""
+    """Build chunks from all emails, attachments, chat messages, AND documents."""
     all_chunks = []
 
     # ── Email chunks ──
@@ -280,6 +314,17 @@ def build_all_chunks(db: Database, chunk_size: int = 500,
 
         if progress_cb:
             progress_cb(f"Chat done: {len(all_chunks)} total chunks ({len(chat_messages)} messages from {len(chats)} chats)")
+
+    # ── Document chunks ──
+    documents = db.get_documents()
+    if documents:
+        if progress_cb:
+            progress_cb(f"Chunking {len(documents)} documents...")
+        for doc in documents:
+            doc_chunks = chunk_document(doc, chunk_size, chunk_overlap)
+            all_chunks.extend(doc_chunks)
+        if progress_cb:
+            progress_cb(f"Documents done: {len(all_chunks)} total chunks")
 
     if progress_cb:
         progress_cb(f"Total: {len(all_chunks)} chunks ready for indexing")

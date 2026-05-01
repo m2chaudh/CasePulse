@@ -95,6 +95,18 @@ def import_directory(dir_path: str, db: Database,
                 source_dir=str(root),
             )
 
+            if content_type and content_type.startswith("image/"):
+                from casepulse.case_theory.metadata_extractor import (
+                    extract_image, persist_metadata,
+                )
+                from casepulse.jobs import enqueue_job
+                md = extract_image(stored_path)
+                persist_metadata(db, md, source_table="documents",
+                                 source_row_id=doc_id)
+                enqueue_job(db, job_type="ocr_attachment",
+                            payload={"source_table": "documents",
+                                     "source_row_id": doc_id})
+
             result["imported"] += 1
             result["files"].append({
                 "filename": file_path.name,
