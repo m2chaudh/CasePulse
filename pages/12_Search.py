@@ -62,7 +62,7 @@ if not hits:
     st.stop()
 
 st.caption(f"{len(hits)} hits")
-for hit in hits:
+for idx, hit in enumerate(hits):
     with st.container(border=True):
         cit = hit.citation
         kind = cit.table.rstrip("s") if cit.table.endswith("s") else cit.table
@@ -80,14 +80,14 @@ for hit in hits:
         with cols[1]:
             if st.button(
                 "View source",
-                key=f"vs_{cit.table}_{cit.row_id}_{hit.score:.4f}",
+                key=f"vs_{cit.table}_{cit.row_id}_{idx}",
             ):
                 from casepulse.case_theory.ui.view_source_dialog import show as show_vs
                 show_vs(db, source_table=cit.table, source_row_id=cit.row_id)
         with cols[2]:
             if st.button(
                 "+ Add to Argument",
-                key=f"ata_{cit.table}_{cit.row_id}_{hit.score:.4f}",
+                key=f"ata_{cit.table}_{cit.row_id}_{idx}",
             ):
                 if active_case_id:
                     from casepulse.case_theory.ui.add_to_argument import show as show_ata
