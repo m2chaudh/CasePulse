@@ -59,9 +59,16 @@ def _photo_metadata_for(db, source_table: str, source_row_id: int):
     }
 
 
-tab_import, tab_docs, tab_timeline, tab_add = st.tabs([
-    "Import Documents", "Document Library", "Timeline Events", "Add Event"
-])
+# Default to Library tab when documents exist; Import otherwise
+_doc_count = len(db.get_documents()) if hasattr(db, "get_documents") else 0
+if _doc_count > 0:
+    tab_docs, tab_import, tab_timeline, tab_add = st.tabs([
+        "Document Library", "Import Documents", "Timeline Events", "Add Event"
+    ])
+else:
+    tab_import, tab_docs, tab_timeline, tab_add = st.tabs([
+        "Import Documents", "Document Library", "Timeline Events", "Add Event"
+    ])
 
 # ══════════════════════════════════════════════════════
 # TAB 1: Import Documents
