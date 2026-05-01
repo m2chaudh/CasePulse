@@ -131,3 +131,47 @@ def test_audit_log_has_hash_columns(tmp_db):
     cols = {row[1] for row in cur.fetchall()}
     assert 'prev_hash' in cols
     assert 'row_hash' in cols
+
+
+def test_witnesses_schema(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    # Table columns
+    cur.execute("PRAGMA table_info(witnesses)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {
+        'id', 'case_id', 'name', 'relationship', 'witness_type',
+        'contact_info', 'status', 'notes', 'created_at', 'updated_at',
+    }
+    # Indices
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='witnesses'"
+    )
+    indices = {row[0] for row in cur.fetchall()}
+    assert 'idx_witnesses_case' in indices
+    assert 'idx_witnesses_type' in indices
+    assert 'idx_witnesses_status' in indices
+    # Idempotent: second init_schema must not error
+    tmp_db._init_schema()
+    cur.execute("PRAGMA table_info(witnesses)")
+    assert len(cur.fetchall()) == 10
+
+
+def test_witness_statements_schema(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    # Table columns
+    cur.execute("PRAGMA table_info(witness_statements)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {
+        'id', 'witness_id', 'statement_text', 'statement_date',
+        'contradiction_id', 'argument_id', 'status', 'created_at',
+    }
+    # Indices
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='witness_statements'"
+    )
+    indices = {row[0] for row in cur.fetchall()}
+    assert 'idx_witness_statements_witness' in indices
+    assert 'idx_witness_statements_contra' in indices
+    assert 'idx_witness_statements_arg' in indices

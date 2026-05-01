@@ -9,6 +9,7 @@ from casepulse.case_theory.models import (
 from casepulse.case_theory.repository import (
     list_arguments_for_contradiction, create_argument,
     update_argument, list_evidence_for_argument,
+    list_statements_for_argument, get_witness,
 )
 from casepulse.case_theory.ui.source_row_card import (
     format_one_line_meta, icon_for,
@@ -46,19 +47,60 @@ def render(db, *, contradiction_id: int) -> None:
                 st.markdown(f"_Attached evidence ({len(evidence_list)}):_")
                 for entry in evidence_list:
                     ev = entry["evidence"]
-                    cols = st.columns([4, 1])
+                    cols = st.columns([6, 1])
                     with cols[0]:
                         st.markdown(
-                            f"- {format_one_line_meta(kind=ev.evidence_kind.value, subject=ev.snippet or ev.source_table)}"
+                            f"- **{format_one_line_meta(kind=ev.evidence_kind.value, subject=ev.snippet or ev.source_table)}**"
                         )
-                    with cols[1]:
-                        if st.button("View as exhibit", key=f"vae_{ev.id}"):
-                            st.info("Exhibit preview ships in Plan 1.3.")
-                    if st.button("✎ refine snippet", key=f"ref_{ev.id}"):
-                        from casepulse.case_theory.ui.refine_snippet_dialog import show as show_refine
-                        show_refine(db, evidence_id=ev.id,
+                        # Clickable snippet — opens View source dialog with highlight + auto-scroll
+                        if ev.snippet:
+                            label = (
+                                f"📖 {ev.snippet[:120]}"
+                                + ("…" if len(ev.snippet) > 120 else "")
+                            )
+                            if st.button(
+                                label,
+                                key=f"snip_link_{ev.id}",
+                                help="Click to view this snippet in its source context",
+                            ):
+                                from casepulse.case_theory.ui.view_source_dialog import show as show_source
+                                show_source(
+                                    db,
                                     source_table=ev.source_table,
-                                    source_row_id=ev.source_row_id)
+                                    source_row_id=ev.source_row_id,
+                                    char_start=ev.char_start,
+                                    char_end=ev.char_end,
+                                )
+                    with cols[1]:
+                        if st.button("✎", key=f"ref_{ev.id}", help="Refine snippet"):
+                            from casepulse.case_theory.ui.refine_snippet_dialog import show as show_refine
+                            show_refine(
+                                db, evidence_id=ev.id,
+                                source_table=ev.source_table,
+                                source_row_id=ev.source_row_id,
+                            )
+
+            # Witness statements pane — only shown for Witness-type arguments
+            if a.argument_type == ArgumentType.WITNESS:
+                st.markdown("**Linked witness statements**")
+                linked_stmts = list_statements_for_argument(db, a.id)
+                if linked_stmts:
+                    for stmt in linked_stmts:
+                        witness = get_witness(db, stmt.witness_id)
+                        if witness:
+                            name = witness.name
+                            rel = f" ({witness.relationship})" if witness.relationship else ""
+                        else:
+                            name = f"Witness #{stmt.witness_id}"
+                            rel = ""
+                        st.markdown(
+                            f"- **{name}**{rel} — \"{stmt.statement_text}\""
+                        )
+                else:
+                    st.caption(
+                        "No witness statements linked. "
+                        "Add one from the **Witnesses** page."
+                    )
 
             if st.button(f"Edit", key=f"edit_arg_{a.id}"):
                 set_recent_argument_id(st.session_state, a.id)
@@ -69,18 +111,32 @@ def render(db, *, contradiction_id: int) -> None:
 
     with st.expander("+ Add Argument"):
         with st.form(f"new_arg_{contradiction_id}"):
-            title = st.text_input("Title")
+            title = st.text_input(
+                "Title",
+                help="A short label for this argument, e.g. 'Alibi — was at work on March 14'. "
+                     "Appears as a heading in the brief.",
+            )
             arg_type = st.selectbox(
                 "Type",
                 options=[None] + list(ArgumentType),
                 format_func=lambda x: "—" if x is None else x.value,
+                help="Alibi: shows the user wasn't there. Self-contradiction: shows the opposing "
+                     "party's own statements conflict. Witness: a third party will testify. "
+                     "Documentary: a document refutes the claim. Timing: events couldn't have happened "
+                     "as alleged. Pattern: a pattern of similar false claims.",
             )
             strength = st.selectbox(
                 "Strength",
                 options=[None] + list(Strength),
                 format_func=lambda x: "—" if x is None else x.value,
+                help="Strong: bulletproof, leads at trial. Moderate: corroborating but not decisive. "
+                     "Circumstantial: supports a pattern but needs other arguments alongside.",
             )
-            reasoning = st.text_area("Reasoning")
+            reasoning = st.text_area(
+                "Reasoning",
+                help="Your analysis of why this argument holds. Keep it concise — "
+                     "this becomes a paragraph in the brief.",
+            )
             submit = st.form_submit_button("Add")
             if submit and title:
                 create_argument(db, Argument(

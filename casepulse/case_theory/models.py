@@ -102,3 +102,48 @@ class Evidence(BaseModel):
     snippet: Optional[str] = None
     source_hash: Optional[str] = None
     created_at: Optional[datetime] = None
+
+
+class WitnessType(str, Enum):
+    CHARACTER = "character"
+    FACT = "fact"
+    BOTH = "both"
+
+
+class WitnessStatus(str, Enum):
+    INITIAL = "initial"
+    CONTACTED = "contacted"
+    WILLING = "willing"
+    HOSTILE = "hostile"
+    SUBPOENAED = "subpoenaed"
+    UNAVAILABLE = "unavailable"
+
+
+class WitnessStatementStatus(str, Enum):
+    DRAFT = "draft"
+    REVIEWED = "reviewed"
+    LOCKED = "locked"
+
+
+class Witness(BaseModel):
+    id: Optional[int] = None
+    case_id: int
+    name: str
+    relationship: Optional[str] = None
+    witness_type: Optional[WitnessType] = None
+    contact_info: Optional[str] = None
+    status: WitnessStatus = WitnessStatus.INITIAL
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class WitnessStatement(BaseModel):
+    id: Optional[int] = None
+    witness_id: int
+    statement_text: str
+    statement_date: Optional[str] = None
+    contradiction_id: Optional[int] = None
+    argument_id: Optional[int] = None
+    status: WitnessStatementStatus = WitnessStatementStatus.DRAFT
+    created_at: Optional[datetime] = None

@@ -16,7 +16,9 @@ st.markdown("Connect your Outlook, Hotmail, and Gmail accounts. You can add mult
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("accounts")
 
 # Track how many accounts have been added (used to reset email input key)
 if "ms_add_counter" not in st.session_state:

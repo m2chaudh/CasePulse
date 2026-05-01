@@ -15,7 +15,9 @@ st.set_page_config(page_title="CasePulse - Cases", page_icon="CP", layout="wide"
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("cases")
 
 st.markdown("## Cases & Evidence Manager")
 
@@ -29,11 +31,22 @@ if not cases:
 with st.expander("Create New Case", expanded=not cases):
     col1, col2 = st.columns(2)
     with col1:
-        case_name = st.text_input("Case Name", placeholder="e.g., Family Law — Smith v. Smith")
-        case_type = st.selectbox("Case Type", ["family", "criminal"],
-                                  format_func=lambda x: {"family": "Family Law", "criminal": "Criminal Defence"}[x])
+        case_name = st.text_input(
+            "Case Name", placeholder="e.g., Family Law — Smith v. Smith",
+            help="A short label that identifies this case in pickers and exports. "
+                 "Use a descriptive name, e.g. 'Family Law' or 'Criminal Defence'.",
+        )
+        case_type = st.selectbox(
+            "Case Type", ["family", "criminal"],
+            format_func=lambda x: {"family": "Family Law", "criminal": "Criminal Defence"}[x],
+            help="Determines the default exhibit format and which export templates apply. "
+                 "Family Law uses lettered exhibits (A, B, C); Criminal Defence uses numbered (1, 2, 3) at trial.",
+        )
     with col2:
-        case_number = st.text_input("Court File Number (optional)", placeholder="e.g., FC-2025-12345")
+        case_number = st.text_input(
+            "Court File Number (optional)", placeholder="e.g., FC-2025-12345",
+            help="The court file number assigned to your matter, if known. Appears on exhibit covers.",
+        )
         exhibit_format = st.selectbox(
             "Exhibit Numbering Format",
             ["alpha", "bates", "numerical", "system"],
@@ -43,6 +56,8 @@ with st.expander("Create New Case", expanded=not cases):
                 "numerical": "Numerical (Exhibit 1, 2, 3...)",
                 "system": "System-Generated (Page A-1)",
             }[x],
+            help="Alphabetical and Numerical are most common in Ontario family/criminal court. "
+                 "Bates is used for large productions to opposing counsel.",
         )
     exhibit_prefix = st.text_input(
         "Exhibit Prefix (optional)",
@@ -199,6 +214,7 @@ with tab_evidence:
                 [""] + [code for code, _ in issues_for_type],
                 format_func=lambda x: dict(issues_for_type).get(x, "Select issue...") if x else "Select issue...",
                 key="bulk_issue",
+                help="Tag all selected items to this legal issue — useful for grouping evidence by theme before export.",
             )
         with col2:
             bulk_flag = st.selectbox(

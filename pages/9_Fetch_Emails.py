@@ -13,7 +13,9 @@ st.markdown("Download emails from your accounts based on selected senders, keywo
 
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("fetch_emails")
 
 # ── Pre-flight checks ──
 accounts = db.get_accounts()

@@ -20,13 +20,21 @@ def render(db, *, case_id: int) -> int | None:
     for t in themes:
         theme_options[t.id] = t.title
     with st.form(f"new_contradiction_{case_id}"):
-        headline = st.text_input("Headline")
+        headline = st.text_input(
+            "Headline",
+            help="A short summary of this contradiction, e.g. 'Affidavit ¶12 vs Police Report — March 14 events'.",
+        )
         theme_id = st.selectbox(
             "Theme",
             options=list(theme_options.keys()),
             format_func=lambda k: theme_options[k],
+            help="Group related contradictions under a theme like 'Pattern of false reports' "
+                 "or 'Documentary inconsistencies'. Themes become brief sections at export.",
         )
-        notes = st.text_area("Notes (optional)")
+        notes = st.text_area(
+            "Notes (optional)",
+            help="Private working notes — not included in court-ready exports by default.",
+        )
         submit = st.form_submit_button("Create")
         if submit and headline:
             new = create_contradiction(db, Contradiction(

@@ -1,4 +1,4 @@
-"""Shared page initialization — database, config, PIN gate."""
+"""Shared page initialization — database, config, PIN gate, reading styles."""
 import streamlit as st
 import sys
 from pathlib import Path
@@ -7,12 +7,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def init_page():
-    """Initialize database, config, and PIN gate for any page.
+    """Initialize database, config, PIN gate, and inject reading-friendly CSS.
 
     Returns (db, config) if unlocked, or calls st.stop() if locked.
     """
     from casepulse.storage.database import Database
     from casepulse.config import Config
+    from casepulse.case_theory.ui.reading_styles import inject_global
 
     if "db" not in st.session_state:
         st.session_state.db = Database()
@@ -27,7 +28,10 @@ def init_page():
     if not render_pin_gate(db):
         st.stop()
 
-    # Show running background jobs in sidebar
+    # Reading-friendly CSS — inject once per page render
+    inject_global()
+
+    # Show running background jobs in sidebar (existing functionality)
     running_jobs = db.get_running_jobs()
     if running_jobs:
         with st.sidebar:

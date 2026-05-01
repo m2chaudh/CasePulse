@@ -13,7 +13,9 @@ st.markdown("## Documents & Timeline")
 st.markdown("Import documents, extract text, build timeline events.")
 
 from components.page_init import init_page
+from casepulse.case_theory.ui import page_help
 db, config = init_page()
+page_help.render("documents")
 
 # Active case for "+ Add to Argument" (sidebar picker)
 _all_cases = db.get_cases() if hasattr(db, "get_cases") else []

@@ -11,6 +11,7 @@ from casepulse.setup_wizard import (
     MODULES, is_setup_complete, load_installed_modules,
     save_installed_modules, get_default_selections,
 )
+from casepulse.case_theory.ui import page_help
 
 # If setup is already done, show settings view
 setup_done = is_setup_complete()
@@ -22,6 +23,8 @@ else:
     st.markdown("## Welcome to CasePulse")
     st.markdown("Select the modules you want to enable. You can change this later in Setup.")
     st.info("Core features (Accounts, Email Fetch, Timeline, Import Chats, Cases, Export) are always included.")
+
+page_help.render("setup")
 
 current = load_installed_modules() if setup_done else get_default_selections()
 
