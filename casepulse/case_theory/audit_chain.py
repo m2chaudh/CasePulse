@@ -28,19 +28,36 @@ def get_last_hash(db: Database) -> Optional[str]:
 
 
 def log_chained(db: Database, *, action: str, details: dict) -> int:
-    """Insert a hash-chained audit_log row. Returns inserted row id."""
+    """Insert a hash-chained audit_log row. Returns inserted row id.
+
+    Uses BEGIN IMMEDIATE to serialise concurrent writers: only one connection
+    can hold the write lock at a time, so the SELECT prev_hash → INSERT pair
+    is atomic and the chain order cannot be corrupted by a race.
+    """
     conn = db._get_conn()
     cur = conn.cursor()
-    prev = get_last_hash(db)
-    row_data = {"action": action, "details": details}
-    base = (prev or "") + _canonicalize(row_data).decode()
-    row_hash = hashlib.sha256(base.encode("utf-8")).hexdigest()
-    cur.execute("""
-        INSERT INTO audit_log (action, details, prev_hash, row_hash)
-        VALUES (?, ?, ?, ?)
-    """, (action, json.dumps(details), prev, row_hash))
-    conn.commit()
-    return cur.lastrowid
+    cur.execute("BEGIN IMMEDIATE")
+    try:
+        cur.execute(
+            "SELECT row_hash FROM audit_log WHERE row_hash IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        prev = row[0] if row else None
+        row_data = {"action": action, "details": details}
+        base = (prev or "") + _canonicalize(row_data).decode()
+        row_hash = hashlib.sha256(base.encode("utf-8")).hexdigest()
+        cur.execute(
+            "INSERT INTO audit_log (action, details, prev_hash, row_hash) "
+            "VALUES (?, ?, ?, ?)",
+            (action, json.dumps(details), prev, row_hash),
+        )
+        rowid = cur.lastrowid
+        conn.commit()
+        return rowid
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def verify_chain(db: Database) -> bool:

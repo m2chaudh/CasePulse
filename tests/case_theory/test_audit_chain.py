@@ -1,8 +1,10 @@
 # tests/case_theory/test_audit_chain.py
 import hashlib
+import threading
 from casepulse.case_theory.audit_chain import (
     log_chained, verify_chain, get_last_hash,
 )
+from casepulse.storage.database import Database
 
 
 def test_chained_inserts_link(tmp_db):
@@ -50,6 +52,45 @@ def test_verify_chain_skips_pre_w1_legacy_rows(tmp_db):
     log_chained(tmp_db, action="post_w1", details={"id": 1})
     # Chain verification should pass — legacy row is skipped
     assert verify_chain(tmp_db) is True
+
+
+def test_log_chained_concurrent(tmp_path):
+    """8 threads × 5 log_chained calls must yield a valid chain of exactly 40 rows.
+
+    Each thread opens its own Database instance (SQLite requires per-thread
+    connections). BEGIN IMMEDIATE in log_chained serialises writers so the
+    chain is never forked.
+    """
+    db_path = str(tmp_path / "concurrent.db")
+    # Initialise schema by constructing one Database instance
+    Database(db_path)
+
+    errors = []
+
+    def worker():
+        thread_db = Database(db_path)
+        try:
+            for i in range(5):
+                log_chained(thread_db, action="concurrent_write",
+                             details={"thread": threading.get_ident(), "i": i})
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Thread errors: {errors}"
+
+    verify_db = Database(db_path)
+    conn = verify_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM audit_log WHERE row_hash IS NOT NULL")
+    count = cur.fetchone()[0]
+    assert count == 40, f"Expected 40 chained rows, got {count}"
+    assert verify_chain(verify_db) is True
 
 
 def test_chain_survives_legacy_interleaving(tmp_db):
