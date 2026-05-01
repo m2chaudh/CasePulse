@@ -285,6 +285,20 @@ CREATE TABLE IF NOT EXISTS themes (
   UNIQUE(case_id, title)
 );
 CREATE INDEX IF NOT EXISTS idx_themes_case ON themes(case_id);
+
+CREATE TABLE IF NOT EXISTS allegations (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  claim_text TEXT NOT NULL,
+  claimed_date TEXT,
+  source_evidence_id INTEGER REFERENCES evidence(id),
+  status TEXT DEFAULT 'active',
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_allegations_case ON allegations(case_id);
+CREATE INDEX IF NOT EXISTS idx_allegations_date ON allegations(claimed_date);
 """
 
 

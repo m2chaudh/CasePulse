@@ -30,3 +30,12 @@ def test_themes_unique_per_case(tmp_db_with_case):
     cur.execute("INSERT INTO themes(case_id, title) VALUES (?, ?)", (case_id, "T1"))
     with pytest.raises(sqlite3.IntegrityError):
         cur.execute("INSERT INTO themes(case_id, title) VALUES (?, ?)", (case_id, "T1"))
+
+
+def test_allegations_table(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(allegations)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'id', 'case_id', 'title', 'claim_text', 'claimed_date',
+                    'source_evidence_id', 'status', 'notes', 'created_at'}
