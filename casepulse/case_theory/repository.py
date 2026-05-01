@@ -318,3 +318,112 @@ def delete_argument(db: Database, arg_id: int) -> None:
     cur = conn.cursor()
     cur.execute("DELETE FROM arguments WHERE id = ?", (arg_id,))
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Evidence CRUD + argument_evidence linking
+# ---------------------------------------------------------------------------
+
+def _compute_source_hash(db: Database, source_table: str,
+                          source_row_id: int) -> "str | None":
+    """Compute SHA-256 of the source row's primary text."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    text_cols = {
+        "emails": "body_text",
+        "chat_messages": "message_text",
+        "attachments": "extracted_text",
+        "documents": "extracted_text",
+        "annotations": "note_text",
+    }
+    col = text_cols.get(source_table)
+    if not col:
+        return None
+    cur.execute(f"SELECT {col} FROM {source_table} WHERE id = ?",
+                (source_row_id,))
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return hashlib.sha256(row[0].encode("utf-8")).hexdigest()
+
+
+def create_evidence(db: Database, e: Evidence) -> Evidence:
+    """Insert Evidence row. If source_hash is None, computes from source row."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    if e.source_hash is None:
+        e.source_hash = _compute_source_hash(db, e.source_table, e.source_row_id)
+    try:
+        cur.execute("""
+            INSERT INTO evidence (evidence_kind, source_table, source_row_id,
+                                   char_start, char_end, snippet, source_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (e.evidence_kind.value, e.source_table, e.source_row_id,
+              e.char_start, e.char_end, e.snippet, e.source_hash))
+        e.id = cur.lastrowid
+    except sqlite3.IntegrityError:
+        # Same (source_table, source_row_id, char_start, char_end) already exists
+        cur.execute("""
+            SELECT id FROM evidence
+            WHERE source_table = ? AND source_row_id = ?
+              AND COALESCE(char_start, -1) = COALESCE(?, -1)
+              AND COALESCE(char_end, -1) = COALESCE(?, -1)
+        """, (e.source_table, e.source_row_id, e.char_start, e.char_end))
+        e.id = cur.fetchone()[0]
+    conn.commit()
+    return e
+
+
+def attach_evidence_to_argument(
+    db: Database, argument_id: int, evidence_id: int,
+    *, role: EvidenceRole = EvidenceRole.SUPPORTS,
+    display_order: int = 0, notes: Optional[str] = None,
+) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT OR REPLACE INTO argument_evidence
+        (argument_id, evidence_id, role, display_order, notes)
+        VALUES (?, ?, ?, ?, ?)
+    """, (argument_id, evidence_id, role.value, display_order, notes))
+    conn.commit()
+
+
+def detach_evidence_from_argument(db: Database, argument_id: int,
+                                    evidence_id: int) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM argument_evidence
+        WHERE argument_id = ? AND evidence_id = ?
+    """, (argument_id, evidence_id))
+    conn.commit()
+
+
+def list_evidence_for_argument(db: Database,
+                                 argument_id: int) -> list[dict]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT e.id, e.evidence_kind, e.source_table, e.source_row_id,
+               e.char_start, e.char_end, e.snippet, e.source_hash,
+               ae.role, ae.display_order, ae.notes
+        FROM evidence e
+        JOIN argument_evidence ae ON ae.evidence_id = e.id
+        WHERE ae.argument_id = ?
+        ORDER BY ae.display_order, ae.added_at
+    """, (argument_id,))
+    out = []
+    for r in cur.fetchall():
+        out.append({
+            "evidence": Evidence(
+                id=r[0], evidence_kind=EvidenceKind(r[1]),
+                source_table=r[2], source_row_id=r[3],
+                char_start=r[4], char_end=r[5], snippet=r[6],
+                source_hash=r[7],
+            ),
+            "role": EvidenceRole(r[8]),
+            "display_order": r[9],
+            "notes": r[10],
+        })
+    return out
