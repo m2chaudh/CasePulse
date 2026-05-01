@@ -477,6 +477,37 @@ def verify_evidence_hash(db: Database, evidence_id: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Argument picker (for UI dropdowns)
+# ---------------------------------------------------------------------------
+
+def list_recent_arguments_for_picker(db: Database, case_id: int,
+                                      limit: int = 50) -> list[dict]:
+    """Return arguments for picker UIs. Most-recently-edited first.
+
+    Each row: {argument_id, argument_title, contradiction_id,
+              contradiction_headline, theme_title}.
+    """
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT a.id, a.title, c.id, c.headline, t.title
+        FROM arguments a
+        JOIN contradictions c ON c.id = a.contradiction_id
+        LEFT JOIN themes t ON t.id = c.theme_id
+        WHERE c.case_id = ?
+        ORDER BY a.updated_at DESC
+        LIMIT ?
+    """, (case_id, limit))
+    return [{
+        "argument_id": r[0],
+        "argument_title": r[1],
+        "contradiction_id": r[2],
+        "contradiction_headline": r[3],
+        "theme_title": r[4],
+    } for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
 # Evidence snippet refinement
 # ---------------------------------------------------------------------------
 
