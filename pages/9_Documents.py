@@ -39,6 +39,26 @@ def _has_photo_metadata(db, doc_id: int) -> bool:
     return cur.fetchone() is not None
 
 
+def _photo_metadata_for(db, source_table: str, source_row_id: int):
+    """Return photo_metadata dict for a document, or None."""
+    cur = db._get_conn().cursor()
+    cur.execute(
+        "SELECT id, taken_at, camera_make, camera_model, lens, "
+        "software, gps_lat, gps_lon, orientation, exif_present "
+        "FROM photo_metadata WHERE source_table = ? AND source_row_id = ?",
+        (source_table, source_row_id),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "taken_at": row[1], "camera_make": row[2],
+        "camera_model": row[3], "lens": row[4], "software": row[5],
+        "gps_lat": row[6], "gps_lon": row[7],
+        "orientation": row[8], "exif_present": bool(row[9]),
+    }
+
+
 tab_import, tab_docs, tab_timeline, tab_add = st.tabs([
     "Import Documents", "Document Library", "Timeline Events", "Add Event"
 ])
@@ -308,9 +328,16 @@ with tab_docs:
                         db.delete_document(doc["id"])
                         st.rerun()
 
-                # Photo metadata placeholder (Task 4.2 replaces this with real form)
-                if _has_photo_metadata(db, doc["id"]):
-                    st.caption("Photo metadata (strike/attest controls land in Task 4.1).")
+                # Photo metadata attestation form (Task 4.2)
+                pm = _photo_metadata_for(db, "documents", doc["id"])
+                if pm:
+                    with st.expander("Photo metadata"):
+                        from casepulse.case_theory.ui import attestation_form
+                        attestation_form.render(
+                            db,
+                            photo_metadata_id=pm["id"],
+                            photo_metadata=pm,
+                        )
 
 # ══════════════════════════════════════════════════════
 # TAB 3: Timeline Events
