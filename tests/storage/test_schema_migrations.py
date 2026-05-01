@@ -39,3 +39,20 @@ def test_allegations_table(tmp_db):
     cols = {row[1] for row in cur.fetchall()}
     assert cols == {'id', 'case_id', 'title', 'claim_text', 'claimed_date',
                     'source_evidence_id', 'status', 'notes', 'created_at'}
+
+
+def test_contradictions_table(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(contradictions)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'id', 'case_id', 'headline', 'status', 'theme_id',
+                    'display_order', 'notes', 'created_at', 'updated_at'}
+
+
+def test_contradiction_allegations_bridge(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(contradiction_allegations)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'contradiction_id', 'allegation_id'}

@@ -299,6 +299,27 @@ CREATE TABLE IF NOT EXISTS allegations (
 );
 CREATE INDEX IF NOT EXISTS idx_allegations_case ON allegations(case_id);
 CREATE INDEX IF NOT EXISTS idx_allegations_date ON allegations(claimed_date);
+
+CREATE TABLE IF NOT EXISTS contradictions (
+  id INTEGER PRIMARY KEY,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  headline TEXT NOT NULL,
+  status TEXT DEFAULT 'draft',
+  theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL,
+  display_order INTEGER DEFAULT 0,
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_contradictions_case ON contradictions(case_id);
+CREATE INDEX IF NOT EXISTS idx_contradictions_status ON contradictions(status);
+CREATE INDEX IF NOT EXISTS idx_contradictions_theme ON contradictions(theme_id);
+
+CREATE TABLE IF NOT EXISTS contradiction_allegations (
+  contradiction_id INTEGER NOT NULL REFERENCES contradictions(id) ON DELETE CASCADE,
+  allegation_id INTEGER NOT NULL REFERENCES allegations(id) ON DELETE CASCADE,
+  PRIMARY KEY (contradiction_id, allegation_id)
+);
 """
 
 
