@@ -31,3 +31,6 @@ Thumbs.db
 
 # Config with secrets
 config.json
+
+# Brainstorming visual companion (mockups, transient)
+.superpowers/
