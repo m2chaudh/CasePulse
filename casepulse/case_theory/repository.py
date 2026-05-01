@@ -7,6 +7,8 @@ from casepulse.case_theory.models import (
     Contradiction, ContradictionStatus,
     Argument, ArgumentType, Strength,
     Evidence, EvidenceKind, EvidenceRole,
+    Witness, WitnessType, WitnessStatus,
+    WitnessStatement, WitnessStatementStatus,
 )
 from casepulse.storage.database import Database
 
@@ -572,4 +574,175 @@ def update_evidence_snippet(db: Database, evidence_id: int, *,
         UPDATE evidence SET char_start = ?, char_end = ?, snippet = ?
         WHERE id = ?
     """, (char_start, char_end, snippet, evidence_id))
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Witness CRUD
+# ---------------------------------------------------------------------------
+
+def create_witness(db: Database, witness: Witness) -> Witness:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO witnesses
+            (case_id, name, relationship, witness_type, contact_info, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        witness.case_id, witness.name, witness.relationship,
+        witness.witness_type.value if witness.witness_type else None,
+        witness.contact_info,
+        witness.status.value,
+        witness.notes,
+    ))
+    conn.commit()
+    witness.id = cur.lastrowid
+    return witness
+
+
+def get_witness(db: Database, witness_id: int) -> Optional[Witness]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, case_id, name, relationship, witness_type, contact_info,
+               status, notes, created_at, updated_at
+        FROM witnesses WHERE id = ?
+    """, (witness_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return Witness(
+        id=row[0], case_id=row[1], name=row[2], relationship=row[3],
+        witness_type=WitnessType(row[4]) if row[4] else None,
+        contact_info=row[5],
+        status=WitnessStatus(row[6]),
+        notes=row[7],
+    )
+
+
+def list_witnesses(db: Database, case_id: int) -> list[Witness]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, case_id, name, relationship, witness_type, contact_info,
+               status, notes, created_at, updated_at
+        FROM witnesses WHERE case_id = ?
+        ORDER BY name, id
+    """, (case_id,))
+    return [Witness(
+        id=r[0], case_id=r[1], name=r[2], relationship=r[3],
+        witness_type=WitnessType(r[4]) if r[4] else None,
+        contact_info=r[5],
+        status=WitnessStatus(r[6]),
+        notes=r[7],
+    ) for r in cur.fetchall()]
+
+
+def update_witness(db: Database, witness: Witness) -> Witness:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE witnesses
+        SET name = ?, relationship = ?, witness_type = ?, contact_info = ?,
+            status = ?, notes = ?, updated_at = datetime('now')
+        WHERE id = ?
+    """, (
+        witness.name, witness.relationship,
+        witness.witness_type.value if witness.witness_type else None,
+        witness.contact_info,
+        witness.status.value,
+        witness.notes,
+        witness.id,
+    ))
+    conn.commit()
+    return witness
+
+
+def delete_witness(db: Database, witness_id: int) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM witnesses WHERE id = ?", (witness_id,))
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# WitnessStatement CRUD
+# ---------------------------------------------------------------------------
+
+def create_witness_statement(db: Database,
+                              statement: WitnessStatement) -> WitnessStatement:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO witness_statements
+            (witness_id, statement_text, statement_date,
+             contradiction_id, argument_id, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        statement.witness_id, statement.statement_text, statement.statement_date,
+        statement.contradiction_id, statement.argument_id,
+        statement.status.value,
+    ))
+    conn.commit()
+    statement.id = cur.lastrowid
+    return statement
+
+
+def _row_to_statement(r) -> WitnessStatement:
+    return WitnessStatement(
+        id=r[0], witness_id=r[1], statement_text=r[2],
+        statement_date=r[3], contradiction_id=r[4], argument_id=r[5],
+        status=WitnessStatementStatus(r[6]),
+    )
+
+
+def list_statements_for_witness(db: Database,
+                                 witness_id: int) -> list[WitnessStatement]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, witness_id, statement_text, statement_date,
+               contradiction_id, argument_id, status
+        FROM witness_statements WHERE witness_id = ?
+        ORDER BY id
+    """, (witness_id,))
+    return [_row_to_statement(r) for r in cur.fetchall()]
+
+
+def list_statements_for_argument(db: Database,
+                                  argument_id: int) -> list[WitnessStatement]:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, witness_id, statement_text, statement_date,
+               contradiction_id, argument_id, status
+        FROM witness_statements WHERE argument_id = ?
+        ORDER BY id
+    """, (argument_id,))
+    return [_row_to_statement(r) for r in cur.fetchall()]
+
+
+def update_witness_statement(db: Database,
+                              statement: WitnessStatement) -> WitnessStatement:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE witness_statements
+        SET statement_text = ?, statement_date = ?,
+            contradiction_id = ?, argument_id = ?, status = ?
+        WHERE id = ?
+    """, (
+        statement.statement_text, statement.statement_date,
+        statement.contradiction_id, statement.argument_id,
+        statement.status.value,
+        statement.id,
+    ))
+    conn.commit()
+    return statement
+
+
+def delete_witness_statement(db: Database, statement_id: int) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM witness_statements WHERE id = ?", (statement_id,))
     conn.commit()
