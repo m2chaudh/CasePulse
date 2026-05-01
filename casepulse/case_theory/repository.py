@@ -474,3 +474,102 @@ def verify_evidence_hash(db: Database, evidence_id: int) -> bool:
     if stored_hash is None and fresh is None:
         return True
     return stored_hash == fresh
+
+
+# ---------------------------------------------------------------------------
+# Argument picker (for UI dropdowns)
+# ---------------------------------------------------------------------------
+
+def list_recent_arguments_for_picker(db: Database, case_id: int,
+                                      limit: int = 50) -> list[dict]:
+    """Return arguments for picker UIs. Most-recently-edited first.
+
+    Each row: {argument_id, argument_title, contradiction_id,
+              contradiction_headline, theme_title}.
+    """
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT a.id, a.title, c.id, c.headline, t.title
+        FROM arguments a
+        JOIN contradictions c ON c.id = a.contradiction_id
+        LEFT JOIN themes t ON t.id = c.theme_id
+        WHERE c.case_id = ?
+        ORDER BY a.updated_at DESC
+        LIMIT ?
+    """, (case_id, limit))
+    return [{
+        "argument_id": r[0],
+        "argument_title": r[1],
+        "contradiction_id": r[2],
+        "contradiction_headline": r[3],
+        "theme_title": r[4],
+    } for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Evidence snippet refinement
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Photo metadata attestations
+# ---------------------------------------------------------------------------
+
+def record_attestation(
+    db: Database, *,
+    photo_metadata_id: int,
+    field_name: str,
+    status: str,  # "struck" | "attested"
+    reason: "str | None" = None,
+    attestation_text: "str | None" = None,
+    attested_by: "str | None" = None,
+    attested_at: "str | None" = None,
+) -> int:
+    """Insert a metadata_attestations row. Returns the new row id."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO metadata_attestations
+        (photo_metadata_id, field_name, status, reason,
+         attestation_text, attested_by, attested_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (photo_metadata_id, field_name, status, reason,
+          attestation_text, attested_by, attested_at))
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_attestations_for_metadata(db: Database, *,
+                                    photo_metadata_id: int) -> list[dict]:
+    """Return all attestation rows for a photo_metadata record, ordered by creation time."""
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, photo_metadata_id, field_name, status, reason,
+               attestation_text, attested_by, attested_at, created_at
+        FROM metadata_attestations
+        WHERE photo_metadata_id = ?
+        ORDER BY created_at
+    """, (photo_metadata_id,))
+    return [{
+        "id": r[0], "photo_metadata_id": r[1], "field_name": r[2],
+        "status": r[3], "reason": r[4], "attestation_text": r[5],
+        "attested_by": r[6], "attested_at": r[7], "created_at": r[8],
+    } for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Evidence snippet refinement
+# ---------------------------------------------------------------------------
+
+def update_evidence_snippet(db: Database, evidence_id: int, *,
+                             char_start: int | None = None,
+                             char_end: int | None = None,
+                             snippet: str | None = None) -> None:
+    conn = db._get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE evidence SET char_start = ?, char_end = ?, snippet = ?
+        WHERE id = ?
+    """, (char_start, char_end, snippet, evidence_id))
+    conn.commit()

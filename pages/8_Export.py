@@ -21,6 +21,14 @@ cases = db.get_cases()
 # ── Export Presets ──
 st.markdown("### What do you need?")
 
+# Court Bundle presets (Plan 1.3 — renderer not yet built)
+_COURT_BUNDLE_PRESETS = {
+    "Court Bundle (Ontario Family)": "ontario_family",
+    "Court Bundle (Ontario Criminal — Trial)": "ontario_criminal_trial",
+    "Court Bundle (Ontario Criminal — Motion)": "ontario_criminal_motion",
+    "Court Bundle (Generic)": "generic",
+}
+
 preset = st.selectbox(
     "Export type",
     [
@@ -36,9 +44,20 @@ preset = st.selectbox(
         "Exhibit Bundle (PDF)",
         "Full Data (JSON)",
         "Full Data (Markdown)",
+        *_COURT_BUNDLE_PRESETS.keys(),
     ],
     key="export_preset",
 )
+
+# Handle court bundle stubs (Plan 1.3 renderers not yet built)
+if preset in _COURT_BUNDLE_PRESETS:
+    template_key = _COURT_BUNDLE_PRESETS[preset]
+    st.info(
+        f"The **{preset}** export ships in Plan 1.3 (export pipeline). "
+        f"Until then, the data is on disk and ready to render once the "
+        f"`{template_key}` template is available."
+    )
+    st.stop()
 
 st.markdown("### Configure")
 

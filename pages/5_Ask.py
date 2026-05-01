@@ -172,19 +172,38 @@ if prompt:
 
                 sender_filter = None if query_sender == "All senders" else query_sender
 
-                result = engine.query(
+                # Prefer hybrid retrieval (structured citations) when db
+                # is available; fall back to embedding-only query.
+                result = engine.query_structured(
                     question=prompt,
                     top_k=top_k,
                     sender_filter=sender_filter,
+                    db=db,
                 )
 
                 answer = result["answer"]
                 sources = result["sources"]
+                citations = result.get("citations", [])
 
                 st.markdown(answer)
 
-                # Show sources
-                if sources:
+                # Show structured citations if available, else legacy sources
+                if citations:
+                    with st.expander(f"Citations ({len(citations)} results used)"):
+                        for i, cit in enumerate(citations):
+                            icon = {
+                                "emails": "📧",
+                                "chat_messages": "💬",
+                                "attachments": "📎",
+                                "documents": "📄",
+                                "annotations": "📝",
+                            }.get(cit.table, "•")
+                            snippet_preview = (cit.snippet or "")[:100]
+                            st.markdown(
+                                f"**[{i+1}]** {icon} `{cit.table}` row {cit.row_id}"
+                                + (f" — {snippet_preview}" if snippet_preview else "")
+                            )
+                elif sources:
                     with st.expander(f"Sources ({len(sources)} chunks used)"):
                         for i, source in enumerate(sources):
                             meta = source.get("metadata", {})

@@ -59,29 +59,53 @@ if filter_attachments == "With":
 elif filter_attachments == "Without":
     has_att = False
 
-# Get emails
+# FTS5-based keyword pre-filter (replaces LIKE-based keyword param)
+_keep_email_ids: set | None = None
+_keep_chat_ids: set | None = None
+if filter_keyword:
+    try:
+        from casepulse.search.fts import bm25_search
+        _fts_hits = bm25_search(
+            db, filter_keyword,
+            source_types=["emails", "chat_messages"],
+            k=2000,
+        )
+        _keep_email_ids = {h.citation.row_id for h in _fts_hits
+                           if h.citation.table == "emails"}
+        _keep_chat_ids = {h.citation.row_id for h in _fts_hits
+                          if h.citation.table == "chat_messages"}
+    except Exception:
+        # FTS index not built yet — fall through to no-keyword fetch
+        _keep_email_ids = None
+        _keep_chat_ids = None
+
+# Get emails (no keyword param — FTS filter applied below)
 emails_raw = []
 if filter_source != "Chats":
     emails_raw = db.get_emails(
         sender_email=sender_email,
         date_start=str(filter_start),
         date_end=str(filter_end),
-        keyword=filter_keyword if filter_keyword else None,
         direction=direction,
         has_attachments=has_att,
         limit=10000,
     )
+    # Apply FTS5 keep-set if keyword was entered
+    if filter_keyword and _keep_email_ids is not None:
+        emails_raw = [e for e in emails_raw if e["id"] in _keep_email_ids]
 
-# Get chats
+# Get chats (no keyword param — FTS filter applied below)
 chats_raw = []
 if filter_source != "Emails":
     chats_raw = db.get_chat_messages(
         date_start=str(filter_start),
         date_end=str(filter_end),
-        keyword=filter_keyword if filter_keyword else None,
         sender=sender_email,
         limit=10000,
     )
+    # Apply FTS5 keep-set if keyword was entered
+    if filter_keyword and _keep_chat_ids is not None:
+        chats_raw = [m for m in chats_raw if m["id"] in _keep_chat_ids]
 
 # Account filter
 account_lookup = {a["id"]: a["email"] for a in all_accounts}
@@ -241,6 +265,10 @@ cat_colors = {
 
 # Get evidence tags for display (if any case exists)
 cases = db.get_cases()
+# Active case for "+ Add to Argument" (use session override or first case)
+active_case_id = st.session_state.get("active_case_id")
+if not active_case_id and cases:
+    active_case_id = cases[0]["id"]
 tag_map = {}
 if cases:
     for case in cases:
@@ -420,7 +448,7 @@ for item in page_items:
 
         # ── Inline Actions ──
         st.markdown("---")
-        act_col1, act_col2, act_col3, act_col4 = st.columns(4)
+        act_col1, act_col2, act_col3, act_col4, act_col5 = st.columns(5)
 
         with act_col1:
             # Quick annotate
@@ -461,6 +489,21 @@ for item in page_items:
                     "subject": subject,
                     "date": item_date,
                 }
+
+        with act_col5:
+            # + Add to Argument
+            _src_table = "emails" if item_type == "email" else "chat_messages"
+            if st.button("+ Argument", key=f"tl_ata_{item_type}_{item['id']}"):
+                if active_case_id:
+                    from casepulse.case_theory.ui.add_to_argument import show as show_ata
+                    show_ata(
+                        db,
+                        source_table=_src_table,
+                        source_row_id=item["id"],
+                        case_id=active_case_id,
+                    )
+                else:
+                    st.info("No active case — create one in the Cases page first.")
 
         # Show existing annotations
         annotations = db.get_annotations(item_type, item["id"])

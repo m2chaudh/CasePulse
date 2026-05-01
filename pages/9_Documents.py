@@ -15,6 +15,50 @@ st.markdown("Import documents, extract text, build timeline events.")
 from components.page_init import init_page
 db, config = init_page()
 
+# Active case for "+ Add to Argument" (sidebar picker)
+_all_cases = db.get_cases() if hasattr(db, "get_cases") else []
+_active_case_id = st.session_state.get("active_case_id")
+if not _active_case_id and _all_cases:
+    _active_case_id = _all_cases[0]["id"]
+if _all_cases:
+    _case_opts = {f"{c['name']} ({c.get('case_type','case')})": c["id"]
+                  for c in _all_cases}
+    with st.sidebar:
+        st.markdown("### Active Case")
+        _sel_lbl = st.selectbox("Case", list(_case_opts.keys()),
+                                 key="docs_active_case")
+        _active_case_id = _case_opts[_sel_lbl]
+
+
+def _has_photo_metadata(db, doc_id: int) -> bool:
+    cur = db._get_conn().cursor()
+    cur.execute(
+        "SELECT id FROM photo_metadata WHERE source_table = ? AND source_row_id = ?",
+        ("documents", doc_id),
+    )
+    return cur.fetchone() is not None
+
+
+def _photo_metadata_for(db, source_table: str, source_row_id: int):
+    """Return photo_metadata dict for a document, or None."""
+    cur = db._get_conn().cursor()
+    cur.execute(
+        "SELECT id, taken_at, camera_make, camera_model, lens, "
+        "software, gps_lat, gps_lon, orientation, exif_present "
+        "FROM photo_metadata WHERE source_table = ? AND source_row_id = ?",
+        (source_table, source_row_id),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "taken_at": row[1], "camera_make": row[2],
+        "camera_model": row[3], "lens": row[4], "software": row[5],
+        "gps_lat": row[6], "gps_lon": row[7],
+        "orientation": row[8], "exif_present": bool(row[9]),
+    }
+
+
 tab_import, tab_docs, tab_timeline, tab_add = st.tabs([
     "Import Documents", "Document Library", "Timeline Events", "Add Event"
 ])
@@ -267,9 +311,33 @@ with tab_docs:
                     if tl_date:
                         db.update_document(doc["id"], timeline_date=str(tl_date))
 
+                    # + Add to Argument button
+                    if st.button("+ Add to Argument", key=f"docs_ata_{doc['id']}"):
+                        if _active_case_id:
+                            from casepulse.case_theory.ui.add_to_argument import show as _show_ata
+                            _show_ata(
+                                db,
+                                source_table="documents",
+                                source_row_id=doc["id"],
+                                case_id=_active_case_id,
+                            )
+                        else:
+                            st.info("No active case — create one in the Cases page first.")
+
                     if st.button("Delete", key=f"del_doc_{doc['id']}"):
                         db.delete_document(doc["id"])
                         st.rerun()
+
+                # Photo metadata attestation form (Task 4.2)
+                pm = _photo_metadata_for(db, "documents", doc["id"])
+                if pm:
+                    with st.expander("Photo metadata"):
+                        from casepulse.case_theory.ui import attestation_form
+                        attestation_form.render(
+                            db,
+                            photo_metadata_id=pm["id"],
+                            photo_metadata=pm,
+                        )
 
 # ══════════════════════════════════════════════════════
 # TAB 3: Timeline Events
