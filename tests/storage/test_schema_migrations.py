@@ -75,3 +75,13 @@ def test_argument_evidence_bridge(tmp_db):
     cols = {row[1] for row in cur.fetchall()}
     assert cols == {'argument_id', 'evidence_id', 'role',
                     'display_order', 'notes', 'added_at'}
+
+
+def test_evidence_table(tmp_db):
+    conn = tmp_db._get_conn()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(evidence)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert cols == {'id', 'evidence_kind', 'source_table', 'source_row_id',
+                    'char_start', 'char_end', 'snippet', 'source_hash',
+                    'created_at'}

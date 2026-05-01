@@ -345,6 +345,21 @@ CREATE TABLE IF NOT EXISTS argument_evidence (
   added_at TEXT DEFAULT (datetime('now')),
   PRIMARY KEY (argument_id, evidence_id)
 );
+
+CREATE TABLE IF NOT EXISTS evidence (
+  id INTEGER PRIMARY KEY,
+  evidence_kind TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  source_row_id INTEGER NOT NULL,
+  char_start INTEGER,
+  char_end INTEGER,
+  snippet TEXT,
+  source_hash TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(source_table, source_row_id, char_start, char_end)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_source ON evidence(source_table, source_row_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_kind ON evidence(evidence_kind);
 """
 
 
