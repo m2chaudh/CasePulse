@@ -1,8 +1,14 @@
-from casepulse.case_theory.models import Theme, Allegation, AllegationStatus
+from casepulse.case_theory.models import (
+    Theme, Allegation, AllegationStatus,
+    Contradiction, ContradictionStatus,
+)
 from casepulse.case_theory.repository import (
     create_theme, get_theme, list_themes, update_theme, delete_theme,
     create_allegation, get_allegation, list_allegations,
     update_allegation, delete_allegation,
+    create_contradiction, get_contradiction, list_contradictions,
+    update_contradiction, link_allegation_to_contradiction,
+    list_allegations_for_contradiction,
 )
 
 
@@ -51,3 +57,19 @@ def test_create_and_get_allegation(tmp_db_with_case):
     got = get_allegation(db, saved.id)
     assert got.claim_text == "She said Y"
     assert got.status == AllegationStatus.ACTIVE
+
+
+# ---------------------------------------------------------------------------
+# Contradiction + allegation linking tests
+# ---------------------------------------------------------------------------
+
+def test_create_contradiction_and_link_allegation(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    a = create_allegation(db, Allegation(
+        case_id=case_id, title="X", claim_text="text"))
+    c = create_contradiction(db, Contradiction(
+        case_id=case_id, headline="C1"))
+    link_allegation_to_contradiction(db, c.id, a.id)
+    linked = list_allegations_for_contradiction(db, c.id)
+    assert len(linked) == 1
+    assert linked[0].id == a.id
