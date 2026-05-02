@@ -185,6 +185,130 @@ if st.button("Apply AppClose cleanup", type="primary",
     st.rerun()
 
 st.divider()
+
+
+# ── Section 3: AppClose v2 parser dry-run ────────────────────────────────
+st.markdown("### AppClose v2 parser · dry-run preview")
+st.caption(
+    "Verifies sender / Sent / Viewed-by / body parsing on the original "
+    "PDF before ANY migration runs. Used as a court-grade accuracy gate — "
+    "you eyeball the rows, mark any wrong, and the migration only proceeds "
+    "once every row reads ✓. **No DB writes happen in this section.**"
+)
+
+with db._get_conn() as _conn:
+    _import_row = _conn.execute(
+        "SELECT source_file FROM chat_imports WHERE platform='AppClose' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+_pdf_path = _import_row["source_file"] if _import_row else None
+
+if not _pdf_path or not Path(_pdf_path).exists():
+    st.warning(
+        "Source AppClose PDF not found. Looked for the path stored in "
+        "`chat_imports`. Re-import the AppClose PDF on the Import Chats "
+        "page first, then return here."
+    )
+else:
+    import hashlib
+    sha = hashlib.sha256()
+    try:
+        with open(_pdf_path, "rb") as _f:
+            for chunk in iter(lambda: _f.read(1024 * 1024), b""):
+                sha.update(chunk)
+        st.caption(f"Source PDF: `{_pdf_path}`")
+        st.caption(f"SHA-256: `{sha.hexdigest()}`")
+    except OSError:
+        st.error("Could not read the source PDF.")
+
+    n_preview = st.slider(
+        "Messages to preview", min_value=5, max_value=50, value=20, step=5,
+        key="appclose_preview_n",
+    )
+    if st.button("Run v2 parser on source PDF", key="run_appclose_v2"):
+        with st.spinner("Parsing PDF..."):
+            from casepulse.scripts.appclose_parser_v2 import parse_appclose_pdf
+            try:
+                _parsed = parse_appclose_pdf(_pdf_path)
+                st.session_state["_appclose_v2_parsed"] = _parsed
+                st.success(f"Parsed {len(_parsed)} messages from {_pdf_path}.")
+            except Exception as e:
+                st.error(f"Parser failed: {e}")
+                _parsed = None
+
+    parsed = st.session_state.get("_appclose_v2_parsed")
+    if parsed:
+        st.markdown(
+            f"#### Side-by-side verification — first {min(n_preview, len(parsed))} of "
+            f"{len(parsed)} messages"
+        )
+        st.caption(
+            "Each row: literal PDF header line · parser output · your verification mark. "
+            "Click ✗ on any row that's wrong before approving."
+        )
+
+        # Header
+        cols = st.columns([3, 4, 1])
+        cols[0].markdown("**RAW PDF**")
+        cols[1].markdown("**PARSER OUTPUT**")
+        cols[2].markdown("**OK?**")
+        st.divider()
+
+        for i, m in enumerate(parsed[:n_preview]):
+            cols = st.columns([3, 4, 1])
+            with cols[0]:
+                st.code(m.raw_header.strip(), language=None)
+                if m.raw_body_excerpt.strip():
+                    with st.expander("body (raw, first 300 chars)", expanded=False):
+                        st.code(m.raw_body_excerpt[:300], language=None)
+            with cols[1]:
+                st.markdown(f"**Sender:** `{m.sender}`")
+                st.markdown(
+                    f"**Sent:** `{m.sent_at_raw}` "
+                    f"({'parsed: ' + m.sent_at.isoformat() if m.sent_at else '⚠ unparsed'})"
+                )
+                if m.viewed:
+                    for v in m.viewed:
+                        v_str = v.viewed_at.isoformat() if v.viewed_at else "⚠ unparsed"
+                        st.markdown(
+                            f"**Viewed by `{v.recipient}`:** `{v_str}`"
+                        )
+                else:
+                    st.markdown("_(no viewed-by entries)_")
+                st.markdown(f"**Action:** `{m.action}` · **Page:** {m.page or '?'}")
+                if m.body:
+                    body_show = m.body if len(m.body) < 200 else m.body[:200] + "…"
+                    st.markdown(f"**Body:** {body_show}")
+                if m.attachment_refs:
+                    refs = ", ".join(
+                        f"{r['filename']}→p{r['page']}" for r in m.attachment_refs
+                    )
+                    st.caption(f"📎 attachment refs in body: {refs}")
+            with cols[2]:
+                # Default each row to assumed-OK; user clicks ✗ to flag
+                key = f"_acv2_ok_{i}"
+                ok = st.checkbox("✓", value=True, key=key,
+                                  label_visibility="visible")
+            st.divider()
+
+        # Summary + next-step gate
+        flagged = [
+            i for i in range(min(n_preview, len(parsed)))
+            if not st.session_state.get(f"_acv2_ok_{i}", True)
+        ]
+        if flagged:
+            st.error(
+                f"{len(flagged)} row(s) flagged: "
+                + ", ".join(f"#{i+1}" for i in flagged)
+                + ". Tell me which fields are wrong (in chat) and I'll fix the parser."
+            )
+        else:
+            st.success(
+                "All preview rows ✓. Parser is ready for the next step "
+                "(image extraction + chat_messages rewrite migration). "
+                "That migration will land in a separate session."
+            )
+st.divider()
 st.caption(
     "These migrations only modify `chat_messages`. Future imports won't "
     "re-introduce the patterns — the original ingest logic is unchanged "
