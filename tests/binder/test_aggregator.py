@@ -65,7 +65,11 @@ def _seed_email(db, *, case_id, date_received, sender, subject):
         return eid
 
 
-def test_aggregate_includes_case_scoped_emails(tmp_db_with_case):
+def test_aggregate_includes_case_scoped_and_untagged_emails(tmp_db_with_case):
+    """Auto-aggregation design: emails tagged to this case AND untagged
+    emails BOTH show on the calendar. Only items explicitly tagged to a
+    *different* case are excluded (see test_aggregate_email_other_case_excluded).
+    """
     db, case_id = tmp_db_with_case
     _seed_email(db, case_id=case_id,
                  date_received="2024-03-14T10:14:00",
@@ -78,8 +82,7 @@ def test_aggregate_includes_case_scoped_emails(tmp_db_with_case):
     items = aggregate(db, case_id=case_id,
                       date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
     sources = [it.source for it in items]
-    assert "email" in sources
-    assert sum(1 for s in sources if s == "email") == 1
+    assert sum(1 for s in sources if s == "email") == 2
 
 
 def test_aggregate_email_other_case_excluded(tmp_db):

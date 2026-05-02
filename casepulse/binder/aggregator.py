@@ -79,7 +79,10 @@ def _combine(date_str: str, time_str: str) -> datetime:
 def _query_emails(
     db: Database, case_id: int, ds: date, de: date,
 ) -> list[AggregatedItem]:
-    """Emails are scoped to the case via evidence_tags(item_type='email')."""
+    """Emails on the calendar — show everything except items the user has
+    explicitly tagged to a *different* case. So untagged items + items
+    tagged to this case both show; cases the user actively buckets stay
+    isolated. This matches the auto-aggregation expectation."""
     out: list[AggregatedItem] = []
     with db._get_conn() as conn:
         rows = conn.execute(
@@ -87,11 +90,13 @@ def _query_emails(
                       e.recipients, e.date_received, e.date_sent,
                       e.has_attachments
                FROM emails e
-               INNER JOIN evidence_tags t ON t.item_type='email' AND t.item_id=e.id
-               WHERE t.case_id = ?
-                 AND COALESCE(e.date_received, e.date_sent, '') BETWEEN ? AND ?
+               WHERE COALESCE(e.date_received, e.date_sent, '') BETWEEN ? AND ?
+                 AND e.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='email' AND case_id != ?
+                 )
                ORDER BY e.date_received""",
-            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["date_received"] or r["date_sent"] or "")
@@ -134,11 +139,13 @@ def _query_chats(
             """SELECT c.id, c.platform, c.chat_name, c.sender, c.timestamp,
                       c.message_text, c.has_media, c.media_type
                FROM chat_messages c
-               INNER JOIN evidence_tags t ON t.item_type='chat' AND t.item_id=c.id
-               WHERE t.case_id = ?
-                 AND c.timestamp BETWEEN ? AND ?
+               WHERE c.timestamp BETWEEN ? AND ?
+                 AND c.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='chat' AND case_id != ?
+                 )
                ORDER BY c.timestamp""",
-            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["timestamp"] or "")
@@ -170,11 +177,13 @@ def _query_documents(
         rows = conn.execute(
             """SELECT d.id, d.filename, d.created_at, d.content_hash
                FROM documents d
-               INNER JOIN evidence_tags t ON t.item_type='document' AND t.item_id=d.id
-               WHERE t.case_id = ?
-                 AND COALESCE(d.created_at, '') BETWEEN ? AND ?
+               WHERE COALESCE(d.created_at, '') BETWEEN ? AND ?
+                 AND d.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='document' AND case_id != ?
+                 )
                ORDER BY d.created_at""",
-            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["created_at"] or "")
@@ -196,11 +205,13 @@ def _query_attachments(
         rows = conn.execute(
             """SELECT a.id, a.filename, a.created_at, a.email_id
                FROM attachments a
-               INNER JOIN evidence_tags t ON t.item_type='attachment' AND t.item_id=a.id
-               WHERE t.case_id = ?
-                 AND COALESCE(a.created_at, '') BETWEEN ? AND ?
+               WHERE COALESCE(a.created_at, '') BETWEEN ? AND ?
+                 AND a.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='attachment' AND case_id != ?
+                 )
                ORDER BY a.created_at""",
-            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["created_at"] or "")
@@ -217,21 +228,25 @@ def _query_attachments(
 def _query_photos(
     db: Database, case_id: int, ds: date, de: date,
 ) -> list[AggregatedItem]:
-    """Photos are pulled from photo_metadata when its taken_at falls in
-    the window AND its source row (document/attachment) is case-tagged.
-    NOTE: schema uses source_row_id (not source_id) and taken_at (not captured_at)."""
+    """Photos pulled from photo_metadata when their taken_at falls in
+    the window. Excluded only if the source row is explicitly tagged to
+    a *different* case. NOTE: schema uses source_row_id (not source_id)
+    and taken_at (not captured_at)."""
     out: list[AggregatedItem] = []
     with db._get_conn() as conn:
         rows = conn.execute(
             """SELECT pm.id, pm.source_table, pm.source_row_id,
                        pm.taken_at
                 FROM photo_metadata pm
-                INNER JOIN evidence_tags t
-                    ON t.item_type = pm.source_table AND t.item_id = pm.source_row_id
-                WHERE t.case_id = ?
-                  AND COALESCE(pm.taken_at, '') BETWEEN ? AND ?
+                WHERE COALESCE(pm.taken_at, '') BETWEEN ? AND ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM evidence_tags t
+                     WHERE t.item_type = pm.source_table
+                       AND t.item_id = pm.source_row_id
+                       AND t.case_id != ?
+                  )
                 ORDER BY pm.taken_at""",
-            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["taken_at"] or "")
