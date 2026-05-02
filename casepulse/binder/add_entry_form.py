@@ -14,22 +14,34 @@ from casepulse.binder.repository import (
 )
 
 
+_MODE_PREFIX = {
+    "in_person": "",
+    "virtual": "🎥 (Virtual) ",
+    "telephone": "☎ (Phone) ",
+    "hybrid": "🔀 (Hybrid) ",
+}
+
+
 def save_court_appearance(
     db, *, case_id: int, date_str: str, time_str: str,
     forum: str, court_name: str, judge: str,
     own_counsel: str, opposing_counsel: str,
-    purpose: str, outcome: str,
+    purpose: str,
+    outcome: str,
     delay_attribution: Optional[dict],
+    mode: str = "in_person",
+    join_link: str = "",
 ) -> int:
     md = CourtAppearanceMetadata(
         forum=Forum(forum),
         court_name=court_name, judge=judge,
         own_counsel=own_counsel, opposing_counsel=opposing_counsel,
-        purpose=purpose, outcome=outcome,
+        purpose=purpose, mode=mode, join_link=join_link, outcome=outcome,
         delay_attribution=DelayAttribution(**delay_attribution)
             if delay_attribution else None,
     )
-    title = f"{purpose.replace('_', ' ').title()}"
+    prefix = _MODE_PREFIX.get(mode, "")
+    title = f"{prefix}{purpose.replace('_', ' ').title()}"
     if court_name:
         title = f"{title} · {court_name}"
     return create_binder_entry(
@@ -50,6 +62,13 @@ def render_court_form(case_id: int, default_date: str) -> dict:
                 "Forum",
                 ["criminal", "family", "civil"], horizontal=True,
             )
+            mode = st.radio(
+                "Mode",
+                ["in_person", "virtual", "telephone", "hybrid"],
+                horizontal=True,
+                format_func=lambda m: m.replace("_", " ").title(),
+                help="In-person, Zoom/Teams (Virtual), Phone, or a mixed-mode hearing.",
+            )
         with c2:
             court_name = st.text_input("Court name", value="")
             judge = st.text_input("Judge", value="")
@@ -60,6 +79,14 @@ def render_court_form(case_id: int, default_date: str) -> dict:
             ["first_appearance", "set_date", "trial", "motion",
              "case_conference", "settlement_conference", "sentencing", "other"],
         )
+        join_link = ""
+        if mode in ("virtual", "telephone", "hybrid"):
+            join_link = st.text_input(
+                "Join link / dial-in",
+                value="",
+                placeholder="https://zoom.us/j/... or 1-855-... or CaseLines URL",
+                help="Saved with the entry. Click in the Open dialog later to copy.",
+            )
         outcome = st.text_area("Outcome / notes", value="")
 
         delay_attribution = None
@@ -81,7 +108,8 @@ def render_court_form(case_id: int, default_date: str) -> dict:
                 "date_str": date_str, "time_str": time_str,
                 "forum": forum, "court_name": court_name, "judge": judge,
                 "own_counsel": own_counsel, "opposing_counsel": opposing_counsel,
-                "purpose": purpose, "outcome": outcome,
+                "purpose": purpose, "mode": mode, "join_link": join_link,
+                "outcome": outcome,
                 "delay_attribution": delay_attribution,
             }
     return {}

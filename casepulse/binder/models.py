@@ -37,6 +37,8 @@ class CourtAppearanceMetadata(BaseModel):
         "first_appearance", "set_date", "trial", "motion",
         "case_conference", "settlement_conference", "sentencing", "other",
     ] = "other"
+    mode: Literal["in_person", "virtual", "telephone", "hybrid"] = "in_person"
+    join_link: str = ""  # Zoom / Teams / CaseLines URL when mode != in_person
     outcome: str = ""
     delay_attribution: Optional[DelayAttribution] = None
 
