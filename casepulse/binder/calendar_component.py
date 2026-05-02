@@ -109,7 +109,13 @@ def render_calendar(
             "borderColor": "#dc322f",
         })
 
-    state = calendar(events=events, options=options, key=f"binder_cal_{view}")
+    # Include initial_date in the key so month/week navigation creates a
+    # fresh component instance. Otherwise streamlit-calendar reuses the
+    # React component and events from the new month don't render —
+    # specifically observed: Oct 2024 grid stayed empty while the day
+    # drawer below correctly showed Oct 1 / Oct 2 content.
+    state = calendar(events=events, options=options,
+                      key=f"binder_cal_{view}_{initial_date}")
     if not state:
         return None
 
