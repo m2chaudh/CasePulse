@@ -4,13 +4,128 @@ For emails: renders the original HTML body (sanitised) when available so
 paragraphing / formatting is preserved, splits on common thread
 boundaries (Gmail 'On ... wrote:', Outlook 'From: ... Sent: ...',
 '-----Original Message-----', 'Begin forwarded message:'), and shows
-each earlier message in its own expander.
+each earlier message in its own expander. Attachments render inline
+(images displayed; PDFs/docs show extracted text + path; other types
+show metadata + download).
 """
 from __future__ import annotations
 import json
 import re
 from html import escape
+from pathlib import Path
 import streamlit as st
+
+
+def _human_size(n) -> str:
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        return "?"
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def _is_image(content_type: str, filename: str) -> bool:
+    if content_type and content_type.lower().startswith("image/"):
+        return True
+    if filename:
+        ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+        if ext in ("png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif", "heic"):
+            return True
+    return False
+
+
+def _is_pdf(content_type: str, filename: str) -> bool:
+    if content_type and "pdf" in content_type.lower():
+        return True
+    return bool(filename) and filename.lower().endswith(".pdf")
+
+
+def _fetch_attachments(db, email_id: int) -> list[dict]:
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, filename, content_type, size_bytes, file_path,
+                      extracted_text, content_hash, is_duplicate, duplicate_of
+               FROM attachments
+               WHERE email_id = ? ORDER BY id""",
+            (email_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _render_attachment_inline(att: dict, *, key_prefix: str) -> None:
+    """Render a single attachment inside an expander. Images shown
+    inline; PDFs/docs show extracted text + path; other types show
+    metadata only."""
+    filename = att["filename"] or "(unnamed)"
+    size = _human_size(att["size_bytes"])
+    ctype = att["content_type"] or ""
+    label = f"📎 {filename}  ·  {size}"
+    if att["is_duplicate"]:
+        label += "  ·  ⚠ duplicate"
+
+    with st.expander(label, expanded=False):
+        meta_cols = st.columns([3, 1])
+        with meta_cols[0]:
+            st.caption(f"Type: {ctype or 'unknown'}")
+            if att["file_path"]:
+                # Show path as code so user can copy
+                st.code(att["file_path"], language=None)
+        with meta_cols[1]:
+            # Download button if file exists on disk
+            if att["file_path"]:
+                p = Path(att["file_path"])
+                if p.exists() and p.is_file():
+                    try:
+                        with p.open("rb") as f:
+                            data = f.read()
+                        st.download_button(
+                            "Download",
+                            data=data,
+                            file_name=filename,
+                            mime=ctype or "application/octet-stream",
+                            key=f"{key_prefix}_dl_{att['id']}",
+                        )
+                    except OSError:
+                        st.caption("(file unreadable)")
+
+        # Inline preview by type
+        if att["file_path"] and Path(att["file_path"]).exists():
+            if _is_image(ctype, filename):
+                try:
+                    st.image(att["file_path"], use_container_width=True)
+                except Exception as e:
+                    st.caption(f"(image preview failed: {e})")
+            elif _is_pdf(ctype, filename):
+                # Streamlit has no native PDF viewer; surface the text
+                # and tell the user where to find the file.
+                if att.get("extracted_text"):
+                    with st.container(border=True):
+                        st.caption("Extracted text (full PDF below)")
+                        st.markdown(
+                            f"<div class='reading-content'><pre>"
+                            f"{escape(att['extracted_text'][:8000])}"
+                            f"{'…' if len(att['extracted_text']) > 8000 else ''}"
+                            f"</pre></div>",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.caption("No extracted text available. Use Download to open it locally.")
+            elif att.get("extracted_text"):
+                # Plain text / DOCX / etc. — show extracted text
+                with st.container(border=True):
+                    st.markdown(
+                        f"<div class='reading-content'><pre>"
+                        f"{escape(att['extracted_text'][:8000])}"
+                        f"{'…' if len(att['extracted_text']) > 8000 else ''}"
+                        f"</pre></div>",
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.caption("File not on disk (deleted or moved). Metadata only.")
 
 
 def _fetch_email(db, source_id: int):
@@ -255,6 +370,17 @@ def open_item_dialog(db, *, source: str, source_id: int):
                             f"{_plaintext_to_html(chunk)}</div>",
                             unsafe_allow_html=True,
                         )
+
+        # Attachments section — one collapsed expander per attachment.
+        # Images render inline; PDFs/docs show extracted text + path;
+        # everything else shows metadata + Download button.
+        if row["has_attachments"]:
+            atts = _fetch_attachments(db, row["id"])
+            if atts:
+                st.divider()
+                st.markdown(f"#### 📎 Attachments ({len(atts)})")
+                for att in atts:
+                    _render_attachment_inline(att, key_prefix=f"email_{row['id']}")
 
     elif source == "chat":
         row = _fetch_chat(db, source_id)
