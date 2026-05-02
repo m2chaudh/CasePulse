@@ -27,6 +27,7 @@ def aggregate(
     items.extend(_query_documents(db, case_id, date_start, date_end))
     items.extend(_query_attachments(db, case_id, date_start, date_end))
     items.extend(_query_photos(db, case_id, date_start, date_end))
+    items.extend(_query_attached_via_links(db, case_id, date_start, date_end))
     if chip_filter is not None and chip_filter.categories:
         wanted = set(chip_filter.categories)
         items = [it for it in items if it.category in wanted]
@@ -304,3 +305,131 @@ def _populate_cross_refs(
 
     for it in items:
         it.cross_refs = by_key[(it.source, it.source_id)]
+
+
+def _query_attached_via_links(
+    db: Database, case_id: int, ds: date, de: date,
+) -> list[AggregatedItem]:
+    """Items linked via item_links (relationship='part_of') TO any
+    timeline_event in [ds, de]. They render on the anchor's date even
+    when their natural date differs — this is what makes the
+    '+ Attach to this day' shortcut visible on the calendar."""
+    out: list[AggregatedItem] = []
+    ds_iso, de_iso = ds.isoformat(), de.isoformat()
+    with db._get_conn() as conn:
+        # Emails attached to a day-anchor or any timeline_event in range
+        rows = conn.execute(
+            """SELECT e.id, e.subject, e.sender_email, e.sender_name, e.recipients,
+                      e.has_attachments,
+                      te.date AS anchor_date, te.time AS anchor_time
+               FROM item_links il
+               JOIN timeline_events te ON te.id = il.to_id AND il.to_type = 'timeline_event'
+               JOIN emails e ON e.id = il.from_id
+               WHERE il.case_id = ? AND il.relationship = 'part_of'
+                 AND il.from_type = 'email'
+                 AND te.date BETWEEN ? AND ?""",
+            (case_id, ds_iso, de_iso),
+        ).fetchall()
+        for r in rows:
+            when = _combine(r["anchor_date"], r["anchor_time"])
+            sender = r["sender_name"] or r["sender_email"] or ""
+            title = f"{sender} · {r['subject'] or '(no subject)'}"
+            out.append(AggregatedItem(
+                when=when, source="email", source_id=r["id"],
+                category="email", title=title,
+                summary=f"(attached to this day) {r['recipients'] or ''}",
+                metadata={"sender_email": r["sender_email"], "attached": True},
+                has_attachment=bool(r["has_attachments"]),
+            ))
+
+        # Chats
+        rows = conn.execute(
+            """SELECT c.id, c.platform, c.chat_name, c.sender, c.message_text,
+                      c.has_media,
+                      te.date AS anchor_date, te.time AS anchor_time
+               FROM item_links il
+               JOIN timeline_events te ON te.id = il.to_id AND il.to_type = 'timeline_event'
+               JOIN chat_messages c ON c.id = il.from_id
+               WHERE il.case_id = ? AND il.relationship = 'part_of'
+                 AND il.from_type = 'chat'
+                 AND te.date BETWEEN ? AND ?""",
+            (case_id, ds_iso, de_iso),
+        ).fetchall()
+        for r in rows:
+            when = _combine(r["anchor_date"], r["anchor_time"])
+            text = (r["message_text"] or "").strip().replace("\n", " ")
+            if len(text) > 140:
+                text = text[:137] + "…"
+            out.append(AggregatedItem(
+                when=when, source="chat", source_id=r["id"],
+                category="chat",
+                title=f"{r['platform'] or 'chat'} / {r['sender'] or '?'}",
+                summary=f"(attached to this day) {text}",
+                metadata={"chat_name": r["chat_name"] or "", "attached": True},
+                has_attachment=bool(r["has_media"]),
+            ))
+
+        # Documents
+        rows = conn.execute(
+            """SELECT d.id, d.filename, d.content_hash,
+                      te.date AS anchor_date, te.time AS anchor_time
+               FROM item_links il
+               JOIN timeline_events te ON te.id = il.to_id AND il.to_type = 'timeline_event'
+               JOIN documents d ON d.id = il.from_id
+               WHERE il.case_id = ? AND il.relationship = 'part_of'
+                 AND il.from_type = 'document'
+                 AND te.date BETWEEN ? AND ?""",
+            (case_id, ds_iso, de_iso),
+        ).fetchall()
+        for r in rows:
+            when = _combine(r["anchor_date"], r["anchor_time"])
+            out.append(AggregatedItem(
+                when=when, source="document", source_id=r["id"],
+                category="document", title=r["filename"] or "(unnamed)",
+                summary="(attached to this day)",
+                metadata={"content_hash": r["content_hash"] or "", "attached": True},
+            ))
+
+        # Attachments
+        rows = conn.execute(
+            """SELECT a.id, a.filename, a.email_id,
+                      te.date AS anchor_date, te.time AS anchor_time
+               FROM item_links il
+               JOIN timeline_events te ON te.id = il.to_id AND il.to_type = 'timeline_event'
+               JOIN attachments a ON a.id = il.from_id
+               WHERE il.case_id = ? AND il.relationship = 'part_of'
+                 AND il.from_type = 'attachment'
+                 AND te.date BETWEEN ? AND ?""",
+            (case_id, ds_iso, de_iso),
+        ).fetchall()
+        for r in rows:
+            when = _combine(r["anchor_date"], r["anchor_time"])
+            out.append(AggregatedItem(
+                when=when, source="attachment", source_id=r["id"],
+                category="attachment", title=r["filename"] or "(unnamed)",
+                summary="(attached to this day)",
+                metadata={"email_id": r["email_id"], "attached": True},
+            ))
+
+        # Photos
+        rows = conn.execute(
+            """SELECT pm.id, pm.source_table, pm.source_row_id, pm.taken_at,
+                      te.date AS anchor_date, te.time AS anchor_time
+               FROM item_links il
+               JOIN timeline_events te ON te.id = il.to_id AND il.to_type = 'timeline_event'
+               JOIN photo_metadata pm ON pm.id = il.from_id
+               WHERE il.case_id = ? AND il.relationship = 'part_of'
+                 AND il.from_type = 'photo'
+                 AND te.date BETWEEN ? AND ?""",
+            (case_id, ds_iso, de_iso),
+        ).fetchall()
+        for r in rows:
+            when = _combine(r["anchor_date"], r["anchor_time"])
+            out.append(AggregatedItem(
+                when=when, source="photo", source_id=r["id"],
+                category="photo", title="(photo)",
+                summary="(attached to this day)",
+                metadata={"source_table": r["source_table"],
+                          "source_id": r["source_row_id"], "attached": True},
+            ))
+    return out
