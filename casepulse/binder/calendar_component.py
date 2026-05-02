@@ -93,8 +93,30 @@ def render_calendar(
     }
     events = items_to_fc_events(items)
     state = calendar(events=events, options=options, key=f"binder_cal_{view}")
-    if state and state.get("callback") == "dateClick":
-        return state["dateClick"]["date"][:10]
-    if state and state.get("callback") == "select":
-        return state["select"]["start"][:10]
+    if not state:
+        return None
+
+    # streamlit-calendar's state shape varies between versions:
+    #   - older: state["callback"] = "dateClick", state["dateClick"] = {...}
+    #   - newer: state["dateClick"] = {...} populated directly without "callback"
+    # Handle both. Also handle "select" (drag-select) and "eventClick"
+    # (clicking an event chip — return that day too).
+    def _coerce_date(val):
+        if not val:
+            return None
+        if isinstance(val, str):
+            return val[:10]
+        if isinstance(val, dict):
+            for k in ("date", "start", "dateStr"):
+                if val.get(k):
+                    return str(val[k])[:10]
+        return None
+
+    for key in ("dateClick", "select", "eventClick"):
+        payload = state.get(key)
+        if not payload:
+            continue
+        d = _coerce_date(payload)
+        if d:
+            return d
     return None

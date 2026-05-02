@@ -114,12 +114,37 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
         unsafe_allow_html=True,
     )
 
-    st.caption("12 mini-calendars · click a day to open it in the drawer")
-    cols = st.columns(4)
+    # Quick-jump: skip a day picker if the user knows the date
+    st.caption("Jump to a specific day in this year")
+    jump_cols = st.columns([3, 1])
+    with jump_cols[0]:
+        from datetime import date as _date
+        jump_to = st.date_input(
+            "Pick a day",
+            value=_date(year, 1, 1),
+            min_value=_date(year, 1, 1),
+            max_value=_date(year, 12, 31),
+            key=f"year_jump_{year}",
+            label_visibility="collapsed",
+        )
+    with jump_cols[1]:
+        if st.button("Open in Month view", use_container_width=True,
+                      key=f"year_jump_btn_{year}", type="primary"):
+            iso = jump_to.isoformat()
+            st.session_state["binder_selected_date"] = iso
+            st.session_state["binder_anchor_date"] = iso
+            st.session_state["binder_view"] = "month"
+            st.rerun()
+
+    st.caption(
+        "12 mini-calendars · click a month name to jump to its Month view, "
+        "or a day to select it"
+    )
     day_cats = _day_categories_for_year(db, case_id, year)
+    cols = st.columns(4)
     for m in range(1, 13):
         with cols[(m - 1) % 4]:
-            _render_mini_month(year, m, day_cats)
+            _render_mini_month_clickable(year, m, day_cats)
 
     with st.sidebar:
         st.markdown(f"### {year} stats")
@@ -159,7 +184,47 @@ def _day_categories_for_year(db, case_id, year) -> dict[str, set[str]]:
     return out
 
 
+def _render_mini_month_clickable(year: int, month: int, day_cats: dict[str, set[str]]):
+    """Render a clickable mini-month — month name jumps to month view,
+    each day cell selects that day and switches to month view."""
+    import calendar as cal
+    # Month-name button
+    if st.button(f"**{cal.month_name[month]}**",
+                  key=f"yr_month_{year}_{month}",
+                  use_container_width=True):
+        st.session_state["binder_anchor_date"] = f"{year:04d}-{month:02d}-01"
+        st.session_state["binder_view"] = "month"
+        st.rerun()
+
+    cal_obj = cal.Calendar(firstweekday=6)
+    weeks = cal_obj.monthdayscalendar(year, month)
+
+    # Day-of-week header
+    header_cols = st.columns(7)
+    for col, dow in zip(header_cols, ["S", "M", "T", "W", "T", "F", "S"]):
+        col.markdown(f"<div style='text-align:center;opacity:0.5;font-size:0.7em'>{dow}</div>",
+                     unsafe_allow_html=True)
+
+    # Days as buttons
+    for week in weeks:
+        day_cols = st.columns(7)
+        for col, day in zip(day_cols, week):
+            if day == 0:
+                continue
+            iso = f"{year:04d}-{month:02d}-{day:02d}"
+            categories = day_cats.get(iso, set())
+            btn_type = "primary" if categories else "secondary"
+            label = str(day)
+            if col.button(label, key=f"yr_day_{iso}",
+                           use_container_width=True, type=btn_type):
+                st.session_state["binder_selected_date"] = iso
+                st.session_state["binder_anchor_date"] = iso
+                st.session_state["binder_view"] = "month"
+                st.rerun()
+
+
 def _render_mini_month(year: int, month: int, day_cats: dict[str, set[str]]):
+    """Legacy HTML mini-month — kept for tests and back-compat. Not clickable."""
     import calendar as cal
     st.markdown(f"**{cal.month_name[month]}**")
     cal_obj = cal.Calendar(firstweekday=6)
