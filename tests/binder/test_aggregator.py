@@ -120,3 +120,56 @@ def test_aggregate_includes_chats(tmp_db_with_case):
     chats = [it for it in items if it.source == "chat"]
     assert len(chats) == 1
     assert "Sarah" in chats[0].title
+
+
+def _seed_doc(db, *, case_id, filename, content_hash, created_at):
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO documents (filename, file_path, content_hash, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (filename, f"/tmp/{filename}", content_hash, created_at),
+        )
+        did = cur.lastrowid
+        conn.execute(
+            """INSERT INTO evidence_tags (item_type, item_id, case_id)
+               VALUES ('document', ?, ?)""",
+            (did, case_id),
+        )
+        return did
+
+
+def _seed_attachment(db, *, case_id, filename, created_at, email_id=None):
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO attachments (email_id, filename, created_at)
+               VALUES (?, ?, ?)""",
+            (email_id, filename, created_at),
+        )
+        aid = cur.lastrowid
+        conn.execute(
+            """INSERT INTO evidence_tags (item_type, item_id, case_id)
+               VALUES ('attachment', ?, ?)""",
+            (aid, case_id),
+        )
+        return aid
+
+
+def test_aggregate_documents(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    _seed_doc(db, case_id=case_id, filename="affidavit.pdf",
+              content_hash="abc", created_at="2024-03-14T08:00:00")
+    items = aggregate(db, case_id=case_id,
+                      date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
+    docs = [it for it in items if it.source == "document"]
+    assert len(docs) == 1
+    assert docs[0].title == "affidavit.pdf"
+
+
+def test_aggregate_attachments(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    _seed_attachment(db, case_id=case_id, filename="brief.pdf",
+                     created_at="2024-03-14T11:00:00")
+    items = aggregate(db, case_id=case_id,
+                      date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
+    atts = [it for it in items if it.source == "attachment"]
+    assert len(atts) == 1

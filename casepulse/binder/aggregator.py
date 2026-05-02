@@ -24,7 +24,9 @@ def aggregate(
     items.extend(_query_timeline_events(db, case_id, date_start, date_end))
     items.extend(_query_emails(db, case_id, date_start, date_end))
     items.extend(_query_chats(db, case_id, date_start, date_end))
-    # Chat/document/photo/attachment queries added in later tasks.
+    items.extend(_query_documents(db, case_id, date_start, date_end))
+    items.extend(_query_attachments(db, case_id, date_start, date_end))
+    items.extend(_query_photos(db, case_id, date_start, date_end))
     items.sort(key=lambda it: it.when)
     return items
 
@@ -151,5 +153,89 @@ def _query_chats(
             summary=text,
             metadata={"chat_name": r["chat_name"] or ""},
             has_attachment=bool(r["has_media"]),
+        ))
+    return out
+
+
+def _query_documents(
+    db: Database, case_id: int, ds: date, de: date,
+) -> list[AggregatedItem]:
+    out: list[AggregatedItem] = []
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT d.id, d.filename, d.created_at, d.content_hash
+               FROM documents d
+               INNER JOIN evidence_tags t ON t.item_type='document' AND t.item_id=d.id
+               WHERE t.case_id = ?
+                 AND COALESCE(d.created_at, '') BETWEEN ? AND ?
+               ORDER BY d.created_at""",
+            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+        ).fetchall()
+    for r in rows:
+        when = _parse_dt(r["created_at"] or "")
+        if when is None:
+            continue
+        out.append(AggregatedItem(
+            when=when, source="document", source_id=r["id"],
+            category="document", title=r["filename"] or "(unnamed)",
+            summary="", metadata={"content_hash": r["content_hash"] or ""},
+        ))
+    return out
+
+
+def _query_attachments(
+    db: Database, case_id: int, ds: date, de: date,
+) -> list[AggregatedItem]:
+    out: list[AggregatedItem] = []
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT a.id, a.filename, a.created_at, a.email_id
+               FROM attachments a
+               INNER JOIN evidence_tags t ON t.item_type='attachment' AND t.item_id=a.id
+               WHERE t.case_id = ?
+                 AND COALESCE(a.created_at, '') BETWEEN ? AND ?
+               ORDER BY a.created_at""",
+            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+        ).fetchall()
+    for r in rows:
+        when = _parse_dt(r["created_at"] or "")
+        if when is None:
+            continue
+        out.append(AggregatedItem(
+            when=when, source="attachment", source_id=r["id"],
+            category="attachment", title=r["filename"] or "(unnamed)",
+            summary="", metadata={"email_id": r["email_id"]},
+        ))
+    return out
+
+
+def _query_photos(
+    db: Database, case_id: int, ds: date, de: date,
+) -> list[AggregatedItem]:
+    """Photos are pulled from photo_metadata when its taken_at falls in
+    the window AND its source row (document/attachment) is case-tagged.
+    NOTE: schema uses source_row_id (not source_id) and taken_at (not captured_at)."""
+    out: list[AggregatedItem] = []
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT pm.id, pm.source_table, pm.source_row_id,
+                       pm.taken_at
+                FROM photo_metadata pm
+                INNER JOIN evidence_tags t
+                    ON t.item_type = pm.source_table AND t.item_id = pm.source_row_id
+                WHERE t.case_id = ?
+                  AND COALESCE(pm.taken_at, '') BETWEEN ? AND ?
+                ORDER BY pm.taken_at""",
+            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+        ).fetchall()
+    for r in rows:
+        when = _parse_dt(r["taken_at"] or "")
+        if when is None:
+            continue
+        out.append(AggregatedItem(
+            when=when, source="photo", source_id=r["id"],
+            category="photo", title="(photo)", summary="",
+            metadata={"source_table": r["source_table"],
+                      "source_id": r["source_row_id"]},
         ))
     return out
