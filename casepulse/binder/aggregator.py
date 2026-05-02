@@ -114,13 +114,14 @@ def _query_emails(
                       e.recipients, e.date_received, e.date_sent,
                       e.has_attachments
                FROM emails e
-               WHERE COALESCE(e.date_received, e.date_sent, '') BETWEEN ? AND ?
+               WHERE substr(COALESCE(e.date_received, e.date_sent, ''), 1, 10)
+                       BETWEEN ? AND ?
                  AND e.id NOT IN (
                    SELECT item_id FROM evidence_tags
                     WHERE item_type='email' AND case_id != ?
                  )
                ORDER BY e.date_received""",
-            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
+            (ds.isoformat(), de.isoformat(), case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["date_received"] or r["date_sent"] or "")
@@ -179,13 +180,13 @@ def _query_chats(
             """SELECT c.id, c.platform, c.chat_name, c.sender, c.timestamp,
                       c.message_text, c.has_media, c.media_type
                FROM chat_messages c
-               WHERE c.timestamp BETWEEN ? AND ?
+               WHERE substr(c.timestamp, 1, 10) BETWEEN ? AND ?
                  AND c.id NOT IN (
                    SELECT item_id FROM evidence_tags
                     WHERE item_type='chat' AND case_id != ?
                  )
                ORDER BY c.timestamp""",
-            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
+            (ds.isoformat(), de.isoformat(), case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["timestamp"] or "")
@@ -223,13 +224,13 @@ def _query_documents(
         rows = conn.execute(
             """SELECT d.id, d.filename, d.created_at, d.content_hash
                FROM documents d
-               WHERE COALESCE(d.created_at, '') BETWEEN ? AND ?
+               WHERE substr(COALESCE(d.created_at, ''), 1, 10) BETWEEN ? AND ?
                  AND d.id NOT IN (
                    SELECT item_id FROM evidence_tags
                     WHERE item_type='document' AND case_id != ?
                  )
                ORDER BY d.created_at""",
-            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
+            (ds.isoformat(), de.isoformat(), case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["created_at"] or "")
@@ -246,21 +247,37 @@ def _query_documents(
 def _query_attachments(
     db: Database, case_id: int, ds: date, de: date,
 ) -> list[AggregatedItem]:
+    """Attachments: date should be the email's date_received, NOT the
+    attachment's created_at (which is the ingest timestamp). Otherwise a
+    bulk re-fetch piles every attachment on the same day. Use
+    substr(date, 1, 10) for the BETWEEN to dodge T-vs-space separator
+    bugs across stored formats."""
     out: list[AggregatedItem] = []
     with db._get_conn() as conn:
         rows = conn.execute(
-            """SELECT a.id, a.filename, a.created_at, a.email_id
+            """SELECT a.id, a.filename, a.created_at, a.email_id,
+                      e.date_received AS email_received,
+                      e.date_sent AS email_sent
                FROM attachments a
-               WHERE COALESCE(a.created_at, '') BETWEEN ? AND ?
+               LEFT JOIN emails e ON e.id = a.email_id
+               WHERE substr(
+                       COALESCE(e.date_received, e.date_sent, a.created_at, ''),
+                       1, 10
+                     ) BETWEEN ? AND ?
                  AND a.id NOT IN (
                    SELECT item_id FROM evidence_tags
                     WHERE item_type='attachment' AND case_id != ?
                  )
-               ORDER BY a.created_at""",
-            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
+               ORDER BY COALESCE(e.date_received, e.date_sent, a.created_at)""",
+            (ds.isoformat(), de.isoformat(), case_id),
         ).fetchall()
     for r in rows:
-        when = _parse_dt(r["created_at"] or "")
+        # Prefer the email's date_received (when the attachment actually
+        # arrived) over the attachment row's created_at (which is the
+        # ingest timestamp and clusters all attachments on bulk-fetch days).
+        when = (_parse_dt(r["email_received"] or "")
+                or _parse_dt(r["email_sent"] or "")
+                or _parse_dt(r["created_at"] or ""))
         if when is None:
             continue
         out.append(AggregatedItem(
@@ -284,7 +301,7 @@ def _query_photos(
             """SELECT pm.id, pm.source_table, pm.source_row_id,
                        pm.taken_at
                 FROM photo_metadata pm
-                WHERE COALESCE(pm.taken_at, '') BETWEEN ? AND ?
+                WHERE substr(COALESCE(pm.taken_at, ''), 1, 10) BETWEEN ? AND ?
                   AND NOT EXISTS (
                     SELECT 1 FROM evidence_tags t
                      WHERE t.item_type = pm.source_table
@@ -292,7 +309,7 @@ def _query_photos(
                        AND t.case_id != ?
                   )
                 ORDER BY pm.taken_at""",
-            (f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59", case_id),
+            (ds.isoformat(), de.isoformat(), case_id),
         ).fetchall()
     for r in rows:
         when = _parse_dt(r["taken_at"] or "")
