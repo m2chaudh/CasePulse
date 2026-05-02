@@ -52,6 +52,7 @@ nav = st.navigation({
     "Setup": [
         st.Page("pages_modules/setup.py",            title="Setup",            icon=":material/key:"),
         st.Page("pages_modules/accounts.py",         title="Accounts",         icon=":material/mail:"),
+        st.Page("pages_modules/data_repairs.py",     title="Data Repairs",     icon=":material/build:"),
     ],
     "Data Sources": [
         st.Page("pages_modules/discover_senders.py", title="Discover Senders"),
