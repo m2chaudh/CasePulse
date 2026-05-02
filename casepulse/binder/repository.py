@@ -194,3 +194,64 @@ def deactivate_relevant_sender(db: Database, sender_id: int) -> None:
             "UPDATE case_relevant_senders SET active = 0 WHERE id = ?",
             (sender_id,),
         )
+
+
+# ---------------------------------------------------------------------------
+# Item links — typed user-curated relationships
+# ---------------------------------------------------------------------------
+
+def create_item_link(
+    db: Database, *, case_id: int,
+    from_type: str, from_id: int,
+    to_type: str, to_id: int,
+    relationship: str,
+    note: str = "",
+) -> int:
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO item_links
+                (case_id, from_type, from_id, to_type, to_id, relationship, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (case_id, from_type, from_id, to_type, to_id, relationship, note),
+        )
+        if cur.lastrowid:
+            return cur.lastrowid
+        row = conn.execute(
+            """SELECT id FROM item_links WHERE case_id=? AND
+                from_type=? AND from_id=? AND to_type=? AND to_id=? AND relationship=?""",
+            (case_id, from_type, from_id, to_type, to_id, relationship),
+        ).fetchone()
+        return row["id"]
+
+
+def list_links_from(
+    db: Database, *, case_id: int, from_type: str, from_id: int,
+) -> list[dict]:
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, to_type, to_id, relationship, note, created_at
+               FROM item_links
+               WHERE case_id=? AND from_type=? AND from_id=?
+               ORDER BY id""",
+            (case_id, from_type, from_id),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_links_to(
+    db: Database, *, case_id: int, to_type: str, to_id: int,
+) -> list[dict]:
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, from_type, from_id, relationship, note, created_at
+               FROM item_links
+               WHERE case_id=? AND to_type=? AND to_id=?
+               ORDER BY id""",
+            (case_id, to_type, to_id),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_item_link(db: Database, link_id: int) -> None:
+    with db._get_conn() as conn:
+        conn.execute("DELETE FROM item_links WHERE id = ?", (link_id,))

@@ -12,6 +12,7 @@ from casepulse.binder.repository import (
     create_filter_chip, list_filter_chips, delete_filter_chip,
     upsert_relevant_sender, list_relevant_senders,
     deactivate_relevant_sender,
+    create_item_link, list_links_from, list_links_to, delete_item_link,
 )
 
 
@@ -111,3 +112,43 @@ def test_relevant_sender_deactivate(tmp_db_with_case):
     deactivate_relevant_sender(db, sid)
     rows = list_relevant_senders(db, case_id=case_id, active_only=True)
     assert rows == []
+
+
+def test_item_link_roundtrip(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    link_id = create_item_link(
+        db, case_id=case_id,
+        from_type="email", from_id=10,
+        to_type="timeline_event", to_id=20,
+        relationship="responds_to", note="reply chain",
+    )
+    assert link_id > 0
+    out = list_links_from(db, case_id=case_id, from_type="email", from_id=10)
+    assert len(out) == 1
+    assert out[0]["relationship"] == "responds_to"
+    inc = list_links_to(db, case_id=case_id, to_type="timeline_event", to_id=20)
+    assert len(inc) == 1
+
+
+def test_item_link_unique(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    create_item_link(db, case_id=case_id,
+                     from_type="email", from_id=10,
+                     to_type="timeline_event", to_id=20,
+                     relationship="related")
+    create_item_link(db, case_id=case_id,
+                     from_type="email", from_id=10,
+                     to_type="timeline_event", to_id=20,
+                     relationship="related")
+    out = list_links_from(db, case_id=case_id, from_type="email", from_id=10)
+    assert len(out) == 1
+
+
+def test_item_link_delete(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    link_id = create_item_link(db, case_id=case_id,
+                               from_type="document", from_id=1,
+                               to_type="timeline_event", to_id=2,
+                               relationship="part_of")
+    delete_item_link(db, link_id)
+    assert list_links_from(db, case_id=case_id, from_type="document", from_id=1) == []
