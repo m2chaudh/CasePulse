@@ -27,6 +27,9 @@ def aggregate(
     items.extend(_query_documents(db, case_id, date_start, date_end))
     items.extend(_query_attachments(db, case_id, date_start, date_end))
     items.extend(_query_photos(db, case_id, date_start, date_end))
+    if chip_filter is not None and chip_filter.categories:
+        wanted = set(chip_filter.categories)
+        items = [it for it in items if it.category in wanted]
     items.sort(key=lambda it: it.when)
     _populate_cross_refs(db, case_id, items)
     return items
