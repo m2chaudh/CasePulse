@@ -34,10 +34,12 @@ if _row:
 else:
     render_workflow_help(WorkflowState(), default_open=True)
 
-# Theme picker — sits between workflow help and module selection so it's
-# easy to find and try out without scrolling through the rest of Setup.
-with st.expander("Appearance · Theme", expanded=False):
-    render_theme_picker(_db)
+# Theme picker — also exposed in the sidebar (🎨 Theme expander) for
+# every page; this Setup-page version is more prominent.
+st.markdown("---")
+st.markdown("### 🎨 Appearance — Theme")
+render_theme_picker(_db)
+st.markdown("---")
 
 if setup_done:
     st.markdown("## Module Settings")

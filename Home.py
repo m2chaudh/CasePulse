@@ -40,6 +40,14 @@ if not render_pin_gate(st.session_state.db):
 from casepulse.case_theory.ui.reading_styles import inject_global
 inject_global()
 
+# Theme picker in the sidebar — visible on every page so users can
+# experiment without hunting through Setup.
+with st.sidebar:
+    st.markdown("---")
+    with st.expander("🎨 Theme", expanded=False):
+        from casepulse.ui.themes import render_theme_picker
+        render_theme_picker(st.session_state.db, location="main")
+
 nav = st.navigation({
     "Setup": [
         st.Page("pages_modules/setup.py",            title="Setup",            icon=":material/key:"),
