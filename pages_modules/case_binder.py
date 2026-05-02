@@ -191,9 +191,16 @@ else:
         date_end=_view_end(view, anchor_iso),
         chip_filter=chip_filter,
     )
-    clicked = render_calendar(items, view=view, initial_date=anchor_iso)
-    if clicked and clicked != st.session_state.get("binder_selected_date"):
+    _selected = st.session_state.get("binder_selected_date")
+    clicked = render_calendar(
+        items,
+        view=view,
+        initial_date=anchor_iso,
+        selected_date=_selected if isinstance(_selected, str) else None,
+    )
+    if clicked and clicked != _selected:
         st.session_state["binder_selected_date"] = clicked
+        st.session_state["binder_scroll_to_drawer"] = True
         st.rerun()
 
 # Day drawer always renders below — re-read selected_day in case it just changed
@@ -202,6 +209,19 @@ selected_day = date.fromisoformat(sel_val) if isinstance(sel_val, str) \
     else date.fromordinal(sel_val)
 
 st.divider()
+
+# Anchor for scroll-into-view when user clicks a day above
+st.markdown("<div id='binder-day-drawer-anchor'></div>", unsafe_allow_html=True)
+if st.session_state.pop("binder_scroll_to_drawer", False):
+    import streamlit.components.v1 as components
+    components.html(
+        """<script>
+            // Streamlit components run in an iframe; jump in the parent.
+            const target = window.parent.document.getElementById('binder-day-drawer-anchor');
+            if (target) target.scrollIntoView({behavior: 'smooth', block: 'start'});
+        </script>""",
+        height=0,
+    )
 
 # Filter chips — small pill-style buttons under the calendar, above the
 # day drawer they primarily affect. Inline CSS tightens the buttons so

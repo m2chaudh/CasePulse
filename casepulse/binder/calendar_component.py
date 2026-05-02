@@ -79,8 +79,12 @@ def render_calendar(
     items: list[AggregatedItem], *,
     view: str,
     initial_date: str,
+    selected_date: Optional[str] = None,
 ) -> Optional[str]:
-    """Render the calendar. Returns the clicked date (YYYY-MM-DD) if any."""
+    """Render the calendar. Returns the clicked date (YYYY-MM-DD) if any.
+
+    `selected_date` (YYYY-MM-DD) renders a red highlight on that day so
+    the user can see which day the drawer below is showing."""
     fc_view = FC_VIEW_FOR[view]
     options = {
         "initialView": fc_view,
@@ -92,6 +96,19 @@ def render_calendar(
         "height": 720,
     }
     events = items_to_fc_events(items)
+
+    # Phantom 'background' event on the selected day → renders as a
+    # tinted overlay with a red border, so the user sees their selection.
+    if selected_date:
+        events.append({
+            "id": "binder-selected-day-marker",
+            "start": selected_date,
+            "end": selected_date,
+            "display": "background",
+            "backgroundColor": "rgba(220, 50, 47, 0.18)",
+            "borderColor": "#dc322f",
+        })
+
     state = calendar(events=events, options=options, key=f"binder_cal_{view}")
     if not state:
         return None
