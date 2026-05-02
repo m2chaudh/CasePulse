@@ -90,13 +90,22 @@ def open_item_dialog(db, *, source: str, source_id: int):
             st.caption("📎 has attachments")
         st.divider()
         body = row["body_text"] or row["body_html"] or "(no body)"
-        # Try the nicer email renderer; fall back to plain pre-wrap
+        # email_renderer.render_html returns a dict — 'current' is the latest
+        # message, 'earlier' is the forwarded chain (or None). Render current
+        # inline; tuck earlier into an expander.
         try:
             from casepulse.case_theory.ui.email_renderer import render_html
+            rendered = render_html(body)
             st.markdown(
-                f"<div class='reading-content'>{render_html(body)}</div>",
+                f"<div class='reading-content'>{rendered['current']}</div>",
                 unsafe_allow_html=True,
             )
+            if rendered.get("earlier"):
+                with st.expander("Show earlier in thread", expanded=False):
+                    st.markdown(
+                        f"<div class='reading-content'>{rendered['earlier']}</div>",
+                        unsafe_allow_html=True,
+                    )
         except Exception:
             st.markdown(
                 f"<div class='reading-content'><pre>{body}</pre></div>",
