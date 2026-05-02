@@ -3,8 +3,13 @@
 Renders a thin row of colored cells indicating activity intensity for the
 sub-units of the active period — weeks within a month, days within a week.
 Pure visual; no click handlers (the calendar grid below handles selection).
+
+The per-day count is cached for 30 seconds in st.session_state so that
+sequential day navigation (Prev/Next on the day drawer) doesn't re-fire
+35 SQL queries on every step.
 """
 from __future__ import annotations
+import time
 from calendar import monthrange
 from datetime import date, timedelta
 import streamlit as st
@@ -24,9 +29,26 @@ def _density_color(t: float) -> str:
     return "#1e293b"
 
 
+_CACHE_TTL_SEC = 30
+_CACHE_KEY = "_density_count_cache"
+
+
 def _count_items_for_day(db: Database, case_id: int, day: date) -> int:
     """Count all aggregator-visible items for a given day. Mirrors the
-    aggregator's 'exclude only items tagged to a different case' rule."""
+    aggregator's 'exclude only items tagged to a different case' rule.
+
+    Cached in st.session_state for 30 s so sequential day navigation
+    doesn't re-query 5 tables × 7 days × every interaction. Cache is
+    keyed by (case_id, day) and invalidated by TTL only — fine for a
+    visual density indicator."""
+    cache = st.session_state.setdefault(_CACHE_KEY, {})
+    now = time.monotonic()
+    key = (case_id, day.isoformat())
+    if key in cache:
+        ts, val = cache[key]
+        if now - ts < _CACHE_TTL_SEC:
+            return val
+
     ds = day.isoformat()
     de = day.isoformat()
     total = 0
@@ -72,6 +94,7 @@ def _count_items_for_day(db: Database, case_id: int, day: date) -> int:
                 (ds, case_id),
             ).fetchone()
             total += row["n"]
+    cache[key] = (now, total)
     return total
 
 

@@ -323,7 +323,7 @@ def render_personal_event_form(db, case_id: int, default_date: str) -> dict:
     return {}
 
 
-@st.dialog("Add Binder Entry")
+@st.dialog("Add Binder Entry", width="large")
 def open_add_entry_dialog(db, *, case_id: int, default_date: str) -> None:
     """Top-level Add Entry dialog. Renders a category radio + the matching
     sub-form. On submit, dispatches to the correct save_* handler."""

@@ -316,7 +316,7 @@ def _fetch_timeline_event(db, source_id: int):
         ).fetchone()
 
 
-@st.dialog("Item details")
+@st.dialog("Item details", width="large")
 def open_item_dialog(db, *, source: str, source_id: int):
     """Show the content of an item. Read-only viewer."""
     if source == "email":

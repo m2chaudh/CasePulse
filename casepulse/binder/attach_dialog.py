@@ -61,7 +61,7 @@ def _list_for_type(db, *, case_id: int, item_type: str) -> list[dict]:
     return [{"id": r["id"], "label": r["label"] or f"#{r['id']}"} for r in rows]
 
 
-@st.dialog("Attach to this day")
+@st.dialog("Attach to this day", width="large")
 def open_attach_dialog(db, *, case_id: int, day: str) -> None:
     """Pick an existing item (any type) to link to this calendar day.
     Creates a day-anchor personal_event if one doesn't exist and writes
