@@ -70,7 +70,27 @@ def render_day_drawer(db, *, case_id: int, day: date, chip_filter=None) -> None:
 
     st.caption("Chronological · earliest first")
 
-    for it in items:
+    # Walk items chronologically, but collapse runs of consecutive chats
+    # from the same conversation into a single bubble cluster (one inline
+    # view per day per conversation) instead of one row + open-dialog per
+    # message.
+    i = 0
+    while i < len(items):
+        it = items[i]
+        if it.source == "chat":
+            # Find the run length: consecutive chats with same platform+chat_name
+            j = i
+            key = (it.metadata.get("platform", ""), it.metadata.get("chat_name", ""))
+            while (j < len(items)
+                    and items[j].source == "chat"
+                    and (items[j].metadata.get("platform", ""),
+                         items[j].metadata.get("chat_name", "")) == key):
+                j += 1
+            _render_chat_cluster(items[i:j])
+            i = j
+            continue
+
+        # Non-chat: existing single-row pattern
         c1, c2 = st.columns([1, 9])
         with c1:
             st.markdown(f"<div style='opacity:0.6'>{format_time_label(it)}</div>",
@@ -87,6 +107,112 @@ def render_day_drawer(db, *, case_id: int, day: date, chip_filter=None) -> None:
                             unsafe_allow_html=True)
             _render_inline_actions(it)
         st.divider()
+        i += 1
+
+
+# --- Chat bubble cluster --------------------------------------------------
+
+# Senders that are "self" — render right-aligned with a teal/mint bubble.
+# Heuristic: the user's own name typically appears as one of these.
+_SELF_SENDERS = {"You", "Mani", "Manish", "Manish Chaudhary"}
+
+# Colour palette for non-self senders — first-seen gets the first colour,
+# second-seen gets the second, etc. Keeps multi-party AppClose threads
+# distinguishable.
+_SENDER_COLOURS = [
+    "#6e87f4",  # blue (Manisha in mockups)
+    "#d9774e",  # orange
+    "#10a37f",  # green
+    "#a855f7",  # purple
+    "#ef4444",  # red
+]
+
+
+def _is_self(sender: str) -> bool:
+    return sender in _SELF_SENDERS
+
+
+def _sender_colour(sender: str, palette: dict[str, str]) -> str:
+    if sender not in palette:
+        palette[sender] = _SENDER_COLOURS[len(palette) % len(_SENDER_COLOURS)]
+    return palette[sender]
+
+
+def _render_chat_cluster(cluster: list[AggregatedItem]) -> None:
+    """Render a run of chats from the same conversation as a WhatsApp/
+    AppClose-style bubble cluster — one bubble per message, sender-coloured
+    name, time inline. Replaces N pop-out rows with one continuous view."""
+    first = cluster[0]
+    platform = first.metadata.get("platform", "chat")
+    chat_name = first.metadata.get("chat_name", "")
+
+    # Header for the cluster
+    header = f"💬 {platform}"
+    if chat_name:
+        header += f" / {chat_name}"
+    header += f"  ·  {len(cluster)} message(s)"
+
+    # WhatsApp-style for whatsapp, white-background AppClose-style otherwise
+    is_whatsapp = "whatsapp" in platform.lower()
+    bg = "#efeae2" if is_whatsapp else "#ffffff"
+    self_bubble_bg = "#d9fdd3" if is_whatsapp else "#dbeafe"
+    other_bubble_bg = "#ffffff" if is_whatsapp else "#f3f4f6"
+    border_other = "" if is_whatsapp else "border: 1px solid #e5e7eb;"
+    border_self = "" if is_whatsapp else "border: 1px solid #bfdbfe;"
+    self_label_colour = "#00a884" if is_whatsapp else "#1f4e79"
+
+    palette: dict[str, str] = {}
+
+    parts: list[str] = []
+    parts.append(
+        f"<div style='background:{bg}; padding:14px; border-radius:8px; "
+        f"margin: 6px 0;'>"
+    )
+    parts.append(
+        f"<div style='font-size:0.78em; opacity:0.6; margin-bottom:8px'>"
+        f"{header}</div>"
+    )
+
+    for it in cluster:
+        sender = it.metadata.get("sender", "?") or "?"
+        is_me = _is_self(sender)
+        align = "flex-end" if is_me else "flex-start"
+        bubble_bg = self_bubble_bg if is_me else other_bubble_bg
+        border = border_self if is_me else border_other
+        radius = ("8px 8px 0 8px" if is_me else "8px 8px 8px 0")
+        sender_colour = (self_label_colour if is_me
+                          else _sender_colour(sender, palette))
+        sender_label = "You" if is_me else sender
+        time_label = it.when.strftime("%I:%M %p").lstrip("0")
+        body = (it.summary or "").replace("<", "&lt;").replace(">", "&gt;")
+        body = body.replace("\n", "<br>")
+
+        media_hint = ""
+        if it.metadata.get("has_media"):
+            mt = it.metadata.get("media_type", "media")
+            media_hint = (
+                f"<div style='font-size:0.78em; opacity:0.6; "
+                f"margin-top:4px'>📎 {mt}</div>"
+            )
+
+        parts.append(
+            f"<div style='display:flex; justify-content:{align}; margin: 3px 0;'>"
+            f"<div style='max-width:75%; padding:6px 10px 4px; "
+            f"background:{bubble_bg}; border-radius:{radius}; {border}'>"
+            f"<div style='font-size:12.5px; font-weight:600; "
+            f"color:{sender_colour}; margin-bottom:2px'>{sender_label}</div>"
+            f"<div style='white-space:pre-wrap; font-size:14px; "
+            f"line-height:1.4; color:#111827'>{body}</div>"
+            f"{media_hint}"
+            f"<div style='font-size:11px; color:#667781; text-align:right; "
+            f"margin-top:2px'>{time_label}</div>"
+            f"</div>"
+            f"</div>"
+        )
+
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
+    st.divider()
 
 
 def _render_inline_actions(it: AggregatedItem) -> None:

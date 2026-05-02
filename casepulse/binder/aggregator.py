@@ -193,9 +193,9 @@ def _query_chats(
             continue
         platform = r["platform"] or "chat"
         sender = r["sender"] or "?"
-        text = (r["message_text"] or "").strip().replace("\n", " ")
-        if len(text) > 140:
-            text = text[:137] + "…"
+        text = (r["message_text"] or "").strip()
+        # Day drawer renders this as a bubble cluster — keep the FULL text
+        # (no truncation) plus platform/sender/chat_name in metadata.
         out.append(AggregatedItem(
             when=when,
             source="chat",
@@ -203,7 +203,13 @@ def _query_chats(
             category="chat",
             title=f"{platform} / {sender}",
             summary=text,
-            metadata={"chat_name": r["chat_name"] or ""},
+            metadata={
+                "chat_name": r["chat_name"] or "",
+                "platform": platform,
+                "sender": sender,
+                "has_media": bool(r["has_media"]),
+                "media_type": r["media_type"] or "",
+            },
             has_attachment=bool(r["has_media"]),
         ))
     return out
