@@ -16,16 +16,19 @@ from pathlib import Path
 from typing import Optional
 
 
-# A message header line: "Manish Chaudhary on 9/16/2024 5:21PM texted (viewed by Manisha on 9/16/2024 5:35PM):"
-# - Sender + 'on' + sent date+time
-# - Action verb: texted | sent a photo | sent a video | sent a file | Received permission ...
-# - Optional 1+ '(viewed by NAME on DATE TIME)' clauses — group threads can have multiple
+# A message header — anchored to start-of-line (re.MULTILINE) so the sender
+# can't bleed in from the previous message's body. Sender is 1-4 capitalised
+# words; the pre-clean step below merges "Manish\nChaudhary" and "9/16/2024\n
+# 2:20PM" wraps so each header sits on a single line.
 HEADER_RE = re.compile(
-    r"(?P<sender>[\w][\w\s'-]*?)\s+on\s+"
-    r"(?P<sent>\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s*[APap][Mm])\s+"
-    r"(?P<action>texted|sent\s+\w+|Received\s+\w+)"
-    r"(?P<viewed>(?:\s*\(viewed by\s+[^)]+\))*)"
-    r"\s*:?",
+    r"^(?P<sender>[A-Z][\w'-]*(?:[^\S\n]+[A-Z][\w'-]*){0,3})[^\S\n]+on[^\S\n]+"
+    r"(?P<sent>\d{1,2}/\d{1,2}/\d{4}[^\S\n]+\d{1,2}:\d{2}[^\S\n]*[APap][Mm])[^\S\n]+"
+    r"(?P<action>texted|sent[^\S\n]+attachment|sent[^\S\n]+a[^\S\n]+photo|"
+    r"sent[^\S\n]+a[^\S\n]+video|sent[^\S\n]+a[^\S\n]+file|"
+    r"Received[^\S\n]+permission(?:[^\S\n]+to[^\n(]*?)?)"
+    r"(?P<viewed>(?:[^\S\n]*\(viewed by[^\S\n]+[^)]+\))*)"
+    r"[^\S\n]*:?[^\S\n]*$",
+    re.MULTILINE,
 )
 
 # Inside the (viewed by ...) clause — extract recipient + their viewed time.
@@ -121,6 +124,43 @@ def _page_for_offset(offset: int, page_index: list[tuple[int, int]]) -> int:
     return last_page
 
 
+def _normalize_senders(messages: list["ParsedMessage"]) -> None:
+    """Two-pass cleanup: figure out the small set of real participants by
+    frequency, then for any message whose sender starts with extra
+    body-words (e.g. 'Thanks Manish Chaudhary' from 'Thanks' bleeding
+    in from the previous body), peel them off via suffix-match against
+    the participant list. Mutates messages in place."""
+    from collections import Counter
+
+    # First pass: every detected sender
+    counts = Counter(m.sender for m in messages if "\n" not in m.sender)
+    if not counts:
+        return
+    # Treat any sender appearing >= 1% as a real participant
+    threshold = max(2, len(messages) // 100)
+    participants = sorted(
+        (s for s, n in counts.items() if n >= threshold and len(s.split()) <= 3),
+        key=lambda s: -counts[s],
+    )
+    # Second pass: normalise each message's sender to the longest matching
+    # participant suffix
+    for m in messages:
+        # Try longest match first so "Manish Chaudhary" wins over "Chaudhary"
+        matched = False
+        for p in sorted(participants, key=len, reverse=True):
+            if m.sender.endswith(p):
+                m.sender = p
+                matched = True
+                break
+        if matched:
+            continue
+        # The sender might be a name FRAGMENT (just the surname). If exactly
+        # one participant ends with this fragment, use that participant.
+        candidates = [p for p in participants if p.endswith(m.sender)]
+        if len(candidates) == 1:
+            m.sender = candidates[0]
+
+
 def parse_appclose_pdf(file_path: str) -> list[ParsedMessage]:
     """Parse an AppClose PDF export into structured ParsedMessage records.
 
@@ -139,14 +179,24 @@ def parse_appclose_pdf(file_path: str) -> list[ParsedMessage]:
     full_text = "\n".join(pages_text)
     page_index = _build_page_index(pages_text)
 
-    # Pre-clean — fix PDF line-break-in-names so the regex matches:
-    # "Manish\nChaudhary on" → "Manish Chaudhary on"
+    # Pre-clean step 1 — un-wrap names. PDF text extraction breaks lines mid-name
+    # (e.g. the line is just "Manish" then "Chaudhary on 9/16/2024 ..."
+    # on the next line). Merge ONLY when the previous line is a SINGLE
+    # capitalised word (a name fragment) — re.MULTILINE anchors `^` to
+    # line start so previous-message body words can't get glued in.
     full_text = re.sub(
-        r"(\w)\n(\w+(?:\s+\w+)*\s+on\s+\d{1,2}/\d{1,2}/\d{4})",
+        r"^([A-Z][\w'-]*)\n([A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)?\s+on\s+\d{1,2}/\d{1,2}/\d{4})",
+        r"\1 \2",
+        full_text,
+        flags=re.MULTILINE,
+    )
+
+    # Pre-clean step 2 — un-wrap dates. "9/16/2024\n2:20PM" → "9/16/2024 2:20PM"
+    full_text = re.sub(
+        r"(\d{1,2}/\d{1,2}/\d{4})\s*\n\s*(\d{1,2}:\d{2}\s*[APap][Mm])",
         r"\1 \2",
         full_text,
     )
-    full_text = re.sub(r"\n(Choudhary|Chaudhary)", r" \1", full_text)
 
     # Remove preamble + "Conversations" / "*This screen…" blank-state lines
     full_text = PREAMBLE_RE.sub("", full_text)
@@ -207,4 +257,5 @@ def parse_appclose_pdf(file_path: str) -> list[ParsedMessage]:
             attachment_refs=attachment_refs,
         ))
 
+    _normalize_senders(messages)
     return messages
