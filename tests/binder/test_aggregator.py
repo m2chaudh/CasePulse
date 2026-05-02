@@ -92,3 +92,31 @@ def test_aggregate_email_other_case_excluded(tmp_db):
     items = aggregate(db, case_id=case_a,
                       date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
     assert items == []
+
+
+def _seed_chat(db, *, case_id, ts, sender, text):
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO chat_messages (source_type, platform, sender,
+                                            timestamp, message_text)
+               VALUES ('whatsapp', 'whatsapp', ?, ?, ?)""",
+            (sender, ts, text),
+        )
+        cid = cur.lastrowid
+        conn.execute(
+            """INSERT INTO evidence_tags (item_type, item_id, case_id)
+               VALUES ('chat', ?, ?)""",
+            (cid, case_id),
+        )
+        return cid
+
+
+def test_aggregate_includes_chats(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    _seed_chat(db, case_id=case_id, ts="2024-03-14T15:30:00",
+                sender="Sarah", text="see you at 7")
+    items = aggregate(db, case_id=case_id,
+                      date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
+    chats = [it for it in items if it.source == "chat"]
+    assert len(chats) == 1
+    assert "Sarah" in chats[0].title

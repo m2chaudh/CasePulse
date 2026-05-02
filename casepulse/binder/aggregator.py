@@ -23,6 +23,7 @@ def aggregate(
     items: list[AggregatedItem] = []
     items.extend(_query_timeline_events(db, case_id, date_start, date_end))
     items.extend(_query_emails(db, case_id, date_start, date_end))
+    items.extend(_query_chats(db, case_id, date_start, date_end))
     # Chat/document/photo/attachment queries added in later tasks.
     items.sort(key=lambda it: it.when)
     return items
@@ -115,3 +116,40 @@ def _parse_dt(s: str):
         except ValueError:
             continue
     return None
+
+
+def _query_chats(
+    db: Database, case_id: int, ds: date, de: date,
+) -> list[AggregatedItem]:
+    out: list[AggregatedItem] = []
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT c.id, c.platform, c.chat_name, c.sender, c.timestamp,
+                      c.message_text, c.has_media, c.media_type
+               FROM chat_messages c
+               INNER JOIN evidence_tags t ON t.item_type='chat' AND t.item_id=c.id
+               WHERE t.case_id = ?
+                 AND c.timestamp BETWEEN ? AND ?
+               ORDER BY c.timestamp""",
+            (case_id, f"{ds.isoformat()}T00:00:00", f"{de.isoformat()}T23:59:59"),
+        ).fetchall()
+    for r in rows:
+        when = _parse_dt(r["timestamp"] or "")
+        if when is None:
+            continue
+        platform = r["platform"] or "chat"
+        sender = r["sender"] or "?"
+        text = (r["message_text"] or "").strip().replace("\n", " ")
+        if len(text) > 140:
+            text = text[:137] + "…"
+        out.append(AggregatedItem(
+            when=when,
+            source="chat",
+            source_id=r["id"],
+            category="chat",
+            title=f"{platform} / {sender}",
+            summary=text,
+            metadata={"chat_name": r["chat_name"] or ""},
+            has_attachment=bool(r["has_media"]),
+        ))
+    return out
