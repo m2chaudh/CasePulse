@@ -3,46 +3,49 @@ import streamlit as st
 from casepulse.storage.database import Database
 from casepulse.config import Config
 from casepulse.case_theory.ui import page_help
+from casepulse.case_theory.ui.reading_styles import inject_global
 
 db: Database = st.session_state.db
 config: Config = st.session_state.config
 
 st.set_page_config(page_title="CasePulse Dashboard", layout="wide")
+inject_global()
 
-# Custom CSS
+# Page-local CSS — colors harmonise with the Solarized Light theme
 st.markdown("""
 <style>
     .main-header {
         font-size: 2.2rem;
         font-weight: 700;
         margin-bottom: 0;
+        color: #073642;
     }
     .sub-header {
         font-size: 1rem;
-        color: #888;
+        color: #93a1a1;
         margin-top: -10px;
         margin-bottom: 30px;
     }
     .stat-card {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 20px;
+        background: #eee8d5;
+        border-radius: 8px;
+        padding: 18px;
         text-align: center;
-        border: 1px solid #333;
+        border: 1px solid #d3cbb7;
     }
     .stat-number {
-        font-size: 2rem;
+        font-size: 1.9rem;
         font-weight: 700;
-        color: #00d4ff;
+        color: #268bd2;
     }
     .stat-label {
         font-size: 0.85rem;
-        color: #aaa;
-        margin-top: 5px;
+        color: #586e75;
+        margin-top: 4px;
     }
-    .status-ok { color: #00c853; }
-    .status-warn { color: #ffd600; }
-    .status-err { color: #ff1744; }
+    .status-ok   { color: #859900; }
+    .status-warn { color: #b58900; }
+    .status-err  { color: #dc322f; }
 </style>
 """, unsafe_allow_html=True)
 

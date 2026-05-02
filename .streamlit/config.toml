@@ -1,0 +1,17 @@
+[theme]
+# Solarized Light — Ethan Schoonover's reading-optimised palette.
+# Warm cream background and soft warm-gray text reduce eye strain on
+# long evidence-review sessions; the calm blue accent is for active UI
+# (buttons, links, the selected day in the calendar).
+base = "light"
+primaryColor = "#268bd2"
+backgroundColor = "#fdf6e3"
+secondaryBackgroundColor = "#eee8d5"
+textColor = "#586e75"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

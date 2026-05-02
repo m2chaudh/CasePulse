@@ -34,6 +34,12 @@ from casepulse.legal.pin_lock import render_pin_gate
 if not render_pin_gate(st.session_state.db):
     st.stop()
 
+# Inject reading-friendly CSS once per app render. Streamlit's `nav.run()`
+# below executes the active page in the same script run, so the <style>
+# block is already in the DOM when each page renders.
+from casepulse.case_theory.ui.reading_styles import inject_global
+inject_global()
+
 nav = st.navigation({
     "Setup": [
         st.Page("pages_modules/setup.py",            title="Setup",            icon=":material/key:"),
