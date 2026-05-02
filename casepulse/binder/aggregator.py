@@ -118,9 +118,23 @@ def _query_emails(
 
 
 def _parse_dt(s: str):
-    """Parse our common ISO-ish datetime formats. Return None on failure."""
+    """Parse our common ISO-ish datetime formats. Return None on failure.
+
+    Handles UTC suffix 'Z', explicit timezone offsets, microseconds, and
+    plain date-only strings. Always returns a NAIVE datetime (tz stripped)
+    because the rest of the codebase compares naive datetimes."""
     if not s:
         return None
+    s = s.strip()
+    # Python 3.11+ datetime.fromisoformat handles Z, +offsets, microseconds, etc.
+    # Pre-3.11 versions need Z replaced with +00:00.
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00") if s.endswith("Z") else s)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except (ValueError, TypeError):
+        pass
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
         try:

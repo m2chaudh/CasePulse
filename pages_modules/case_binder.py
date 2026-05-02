@@ -11,6 +11,7 @@ from casepulse.binder.day_drawer import render_day_drawer
 from casepulse.binder.year_view import render_year_view
 from casepulse.binder.add_entry_form import open_add_entry_dialog
 from casepulse.binder.attach_dialog import open_attach_dialog
+from casepulse.binder.open_dialog import open_item_dialog
 from casepulse.binder.filter_chips_builtin import BUILTIN_CHIPS, chip_to_filter
 from casepulse.ui.workflow_help import (
     compute_workflow_state, render_workflow_help, WorkflowState,
@@ -213,3 +214,9 @@ if st.session_state.pop("binder_open_attach", False):
         db, case_id=case_id,
         day=st.session_state.get("binder_attach_date", anchor_iso),
     )
+
+# Open-item dialog (clicked from day drawer's Open / Edit buttons)
+_open_src = st.session_state.pop("binder_open_dialog_source", None)
+_open_sid = st.session_state.pop("binder_open_dialog_id", None)
+if _open_src and _open_sid:
+    open_item_dialog(db, source=_open_src, source_id=_open_sid)

@@ -86,6 +86,24 @@ def _render_inline_actions(it: AggregatedItem) -> None:
     # Link picker dialog in Phase B.
     cols = st.columns([1, 1, 6])
     with cols[0]:
-        st.button("Open", key=f"binder_open_{it.source}_{it.source_id}")
+        if st.button("Open", key=f"binder_open_{it.source}_{it.source_id}"):
+            st.session_state["binder_open_dialog_source"] = it.source
+            st.session_state["binder_open_dialog_id"] = it.source_id
+            st.rerun()
     with cols[1]:
-        st.button("Edit", key=f"binder_edit_{it.source}_{it.source_id}")
+        # Edit currently meaningful only for timeline_event entries (binder
+        # entries we created); imported items are read-only — but the Open
+        # dialog for a timeline_event also offers Delete.
+        if it.source == "timeline_event":
+            if st.button("Edit", key=f"binder_edit_{it.source}_{it.source_id}"):
+                st.session_state["binder_open_dialog_source"] = it.source
+                st.session_state["binder_open_dialog_id"] = it.source_id
+                st.rerun()
+        else:
+            st.button(
+                "Edit",
+                key=f"binder_edit_{it.source}_{it.source_id}",
+                disabled=True,
+                help="Imported items aren't editable. Tag/annotate from the "
+                     "Cases page or create a binder entry that links to this item.",
+            )
