@@ -148,3 +148,69 @@ def render_disclosure_form(case_id: int, default_date: str) -> dict:
                 "follow_up_email_id": None,
             }
     return {}
+
+
+def save_counsel_correspondence(
+    db, *, case_id: int, date_str: str, time_str: str,
+    party: str, linked_email_id: Optional[int],
+    summary: str, response_required: bool,
+    response_due_date: Optional[str],
+) -> int:
+    md = CounselCorrespondenceMetadata(
+        party=CounselParty(party),
+        linked_email_id=linked_email_id,
+        summary=summary,
+        response_required=response_required,
+        response_due_date=response_due_date,
+        response_sent_email_id=None,
+    )
+    title = f"{party.replace('_', ' ').title()} correspondence"
+    entry_id = create_binder_entry(
+        db, case_id=case_id, date=date_str, time=time_str,
+        category=BinderCategory.COUNSEL_CORRESPONDENCE,
+        title=title, summary=summary, metadata=md,
+    )
+    if linked_email_id is not None:
+        with db._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO evidence_tags
+                    (item_type, item_id, case_id, legal_issue)
+                   VALUES ('email', ?, ?, 'counsel_correspondence')""",
+                (linked_email_id, case_id),
+            )
+    return entry_id
+
+
+def render_counsel_form(case_id: int, default_date: str) -> dict:
+    with st.form("binder_form_counsel", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            date_str = st.text_input("Date (YYYY-MM-DD)", value=default_date)
+            time_str = st.text_input("Time (HH:MM, optional)", value="")
+            party = st.radio(
+                "Party",
+                ["crown", "opposing_counsel", "own_counsel", "OCL", "other"],
+                horizontal=True,
+            )
+        with c2:
+            linked_email_id = st.number_input(
+                "Linked email id (optional)", min_value=0, value=0, step=1,
+            )
+            response_required = st.checkbox("Response required")
+            response_due_date = ""
+            if response_required:
+                response_due_date = st.text_input(
+                    "Response due date (YYYY-MM-DD)", value="",
+                )
+        summary = st.text_area("Summary", value="")
+        submitted = st.form_submit_button("Save counsel correspondence", type="primary")
+        if submitted:
+            return {
+                "date_str": date_str, "time_str": time_str,
+                "party": party,
+                "linked_email_id": int(linked_email_id) if linked_email_id else None,
+                "summary": summary,
+                "response_required": response_required,
+                "response_due_date": response_due_date or None,
+            }
+    return {}

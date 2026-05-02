@@ -52,3 +52,43 @@ def test_save_disclosure(tmp_db_with_case):
     assert md["page_count"] == 47
     assert md["completion_status"] == "expecting_more"
     assert md["outstanding_flag"] is False
+
+
+from casepulse.binder.add_entry_form import save_counsel_correspondence
+
+
+def test_save_counsel_correspondence_no_email(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    entry_id = save_counsel_correspondence(
+        db, case_id=case_id, date_str="2024-03-14", time_str="",
+        party="opposing_counsel", linked_email_id=None,
+        summary="Letter re Form 13",
+        response_required=True, response_due_date="2024-04-01",
+    )
+    row = get_binder_entry(db, entry_id)
+    md = json.loads(row["metadata_json"])
+    assert md["party"] == "opposing_counsel"
+    assert md["linked_email_id"] is None
+
+
+def test_save_counsel_correspondence_with_email(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO emails (subject, sender_email, date_received)
+               VALUES ('S','x@y','2024-03-14T10:00:00')""")
+        eid = cur.lastrowid
+    entry_id = save_counsel_correspondence(
+        db, case_id=case_id, date_str="2024-03-14", time_str="10:00",
+        party="crown", linked_email_id=eid, summary="Re disclosure",
+        response_required=False, response_due_date=None,
+    )
+    md = json.loads(get_binder_entry(db, entry_id)["metadata_json"])
+    assert md["linked_email_id"] == eid
+    with db._get_conn() as conn:
+        row = conn.execute(
+            """SELECT legal_issue FROM evidence_tags
+               WHERE item_type='email' AND item_id=? AND case_id=?""",
+            (eid, case_id),
+        ).fetchone()
+    assert row["legal_issue"] == "counsel_correspondence"
