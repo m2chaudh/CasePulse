@@ -9,6 +9,7 @@ from casepulse.binder.models import (
 from casepulse.binder.repository import (
     create_binder_entry, get_binder_entry, list_binder_entries_for_day,
     update_binder_entry, delete_binder_entry,
+    create_filter_chip, list_filter_chips, delete_filter_chip,
 )
 
 
@@ -69,3 +70,17 @@ def test_delete(tmp_db_with_case):
                                    title="x", summary="", metadata=md)
     delete_binder_entry(db, entry_id)
     assert get_binder_entry(db, entry_id) is None
+
+
+def test_filter_chip_roundtrip(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    chip_id = create_filter_chip(
+        db, case_id=case_id, label="Witness mentions", emoji="★",
+        filter_json={"witness_id": "any"}, pinned=True, sort_order=0,
+    )
+    chips = list_filter_chips(db, case_id=case_id)
+    assert len(chips) == 1
+    assert chips[0]["label"] == "Witness mentions"
+    assert chips[0]["pinned"] == 1
+    delete_filter_chip(db, chip_id)
+    assert list_filter_chips(db, case_id=case_id) == []
