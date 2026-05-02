@@ -37,6 +37,38 @@ def _view_end(view: str, anchor_iso: str) -> date:
     return d
 
 
+def _nav_step(view: str, anchor_iso: str, direction: int) -> str:
+    """Step the anchor date forward/back by one unit of `view`."""
+    d = date.fromisoformat(anchor_iso)
+    if view == "year":
+        return d.replace(year=d.year + direction).isoformat()
+    if view == "month":
+        # Month arithmetic with day-clamp for month-end dates.
+        total = d.year * 12 + (d.month - 1) + direction
+        y, m = divmod(total, 12)
+        m += 1
+        last_day = monthrange(y, m)[1]
+        return date(y, m, min(d.day, last_day)).isoformat()
+    if view == "week":
+        return (d + timedelta(days=7 * direction)).isoformat()
+    return (d + timedelta(days=direction)).isoformat()
+
+
+def _period_label(view: str, anchor_iso: str) -> str:
+    d = date.fromisoformat(anchor_iso)
+    if view == "year":
+        return str(d.year)
+    if view == "month":
+        return d.strftime("%B %Y")
+    if view == "week":
+        start = d - timedelta(days=d.weekday())
+        end = start + timedelta(days=6)
+        if start.year == end.year and start.month == end.month:
+            return f"{start.strftime('%b %d')} – {end.strftime('%d, %Y')}"
+        return f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
+    return d.strftime("%a, %B %d, %Y")
+
+
 def _active_case_id(db: Database):
     if "active_case_id" in st.session_state:
         return st.session_state["active_case_id"]
@@ -69,19 +101,41 @@ if case_id is None:
     render_workflow_help(WorkflowState(), default_open=True)
     st.stop()
 
-# View tabs + Today button
-top = st.columns([2, 1, 4])
-with top[0]:
+# View tabs
+view_row = st.columns([3, 7])
+with view_row[0]:
     view = st.radio(
         "View", ["year", "month", "week", "day"],
         horizontal=True, key="binder_view", index=1,
     )
-with top[1]:
-    today_btn = st.button("Today")
 
-# Date state
-if "binder_anchor_date" not in st.session_state or today_btn:
+# Date state — initialise before the nav row uses it
+if "binder_anchor_date" not in st.session_state:
     st.session_state["binder_anchor_date"] = date.today().isoformat()
+anchor_iso = st.session_state["binder_anchor_date"]
+
+# Date navigation row — Prev | Period label | Next | Today
+nav = st.columns([1, 5, 1, 1])
+with nav[0]:
+    if st.button("‹ Prev", key="binder_nav_prev", use_container_width=True):
+        st.session_state["binder_anchor_date"] = _nav_step(view, anchor_iso, -1)
+        st.rerun()
+with nav[1]:
+    st.markdown(
+        f"<div style='text-align:center;font-weight:600;font-size:1.05em;padding-top:6px'>"
+        f"{_period_label(view, anchor_iso)}</div>",
+        unsafe_allow_html=True,
+    )
+with nav[2]:
+    if st.button("Next ›", key="binder_nav_next", use_container_width=True):
+        st.session_state["binder_anchor_date"] = _nav_step(view, anchor_iso, 1)
+        st.rerun()
+with nav[3]:
+    if st.button("Today", key="binder_today", use_container_width=True):
+        st.session_state["binder_anchor_date"] = date.today().isoformat()
+        st.rerun()
+
+# Re-read after potential update above (rerun reset)
 anchor_iso = st.session_state["binder_anchor_date"]
 
 if "binder_selected_date" not in st.session_state:
