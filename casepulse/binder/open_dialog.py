@@ -147,6 +147,94 @@ def _resolve_cid_images(html: str, attachments: list[dict]) -> tuple[str, set[in
     return _CID_RE.sub(_replace, html), inline_ids
 
 
+def _render_email_message(
+    db, msg: dict, *,
+    expanded: bool,
+    is_focal: bool,
+    seen_hashes: dict,
+) -> None:
+    """Render one email message in the thread — headers, body (with cid:
+    images inlined), and the message's own attachments. Attachments
+    already seen earlier in the thread (by content_hash) render as a
+    dedup notice instead of a duplicate. The whole block lives inside an
+    expander labelled with sender + date, expanded based on the flag."""
+    sender = msg["sender_name"] or msg["sender_email"] or "?"
+    when = msg["date_received"] or msg["date_sent"] or "?"
+    label = f"{'★ ' if is_focal else ''}From {sender} · {when}"
+
+    with st.expander(label, expanded=expanded):
+        to_str = _format_recipients(msg["recipients"])
+        cc_str = _format_recipients(msg["cc"])
+        if to_str:
+            st.caption(f"To: {to_str}")
+        if cc_str:
+            st.caption(f"Cc: {cc_str}")
+
+        # Pre-fetch attachments so cid: in body can resolve
+        atts = _fetch_attachments(db, msg["id"]) if msg["has_attachments"] else []
+        inline_ids: set[int] = set()
+
+        body_html = msg["body_html"]
+        body_text = msg["body_text"]
+
+        if body_html:
+            html, inline_ids = _resolve_cid_images(body_html, atts)
+            safe = _sanitize_html(html)
+            st.markdown(
+                f"<div class='reading-content email-body'>{safe}</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            body = body_text or "(no body)"
+            parts = _split_thread(body)
+            if parts:
+                st.markdown(
+                    f"<div class='reading-content'>"
+                    f"{_plaintext_to_html(parts[0])}</div>",
+                    unsafe_allow_html=True,
+                )
+                for chunk in parts[1:]:
+                    with st.expander(f"↪ {_peek_thread_header(chunk)}"):
+                        st.markdown(
+                            f"<div class='reading-content'>"
+                            f"{_plaintext_to_html(chunk)}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+        # Attachments for THIS message — non-inline ones
+        non_inline = [a for a in atts if a["id"] not in inline_ids]
+        if non_inline or inline_ids:
+            n_visible = len(non_inline)
+            n_inline = len(inline_ids)
+            header_bits = []
+            if n_visible:
+                header_bits.append(f"{n_visible} file(s)")
+            if n_inline:
+                header_bits.append(f"{n_inline} inline image(s) shown above")
+            if header_bits:
+                st.markdown("**📎 Attachments — " + " · ".join(header_bits) + "**")
+
+            for att in non_inline:
+                ch = att.get("content_hash") or ""
+                prior = seen_hashes.get(ch) if ch else None
+                if prior:
+                    # Dedup — same file as in earlier message
+                    st.markdown(
+                        f"📎 **{att['filename']}** "
+                        f"<small>· {_human_size(att['size_bytes'])} · "
+                        f"<em>same file as in {prior['date']} from {prior['from']}</em>"
+                        f"</small>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    if ch:
+                        seen_hashes[ch] = {
+                            "date": when, "from": sender,
+                            "filename": att["filename"],
+                        }
+                    _render_attachment_inline(att, key_prefix=f"email_{msg['id']}")
+
+
 def _render_attachment_inline(att: dict, *, key_prefix: str) -> None:
     """Render a single attachment inside an expander. Images shown
     inline; PDFs/docs show extracted text + path; other types show
@@ -227,10 +315,54 @@ def _fetch_email(db, source_id: int):
         return conn.execute(
             """SELECT id, subject, sender_email, sender_name, recipients,
                       cc, date_received, date_sent, body_text, body_html,
-                      has_attachments
+                      has_attachments, parent_email_id
                FROM emails WHERE id = ?""",
             (source_id,),
         ).fetchone()
+
+
+def _fetch_email_thread(db, email_id: int) -> list[dict]:
+    """Walk parent_email_id forward (children) and backward (parents)
+    to assemble the email thread. Returns chronologically sorted list
+    (oldest first). The email_id passed in is always included."""
+    seen: set[int] = set()
+    thread: list[dict] = []
+
+    def add(row):
+        if row and row["id"] not in seen:
+            seen.add(row["id"])
+            thread.append(dict(row))
+
+    # Walk backward: this email → its parent → grandparent → ...
+    cur_id = email_id
+    while cur_id and cur_id not in seen:
+        row = _fetch_email(db, cur_id)
+        if not row:
+            break
+        add(row)
+        cur_id = row["parent_email_id"]
+
+    # Walk forward: anyone whose parent_email_id is in our seen set
+    frontier = set(seen)
+    while frontier:
+        with db._get_conn() as conn:
+            placeholders = ",".join("?" for _ in frontier)
+            rows = conn.execute(
+                f"""SELECT id FROM emails
+                    WHERE parent_email_id IN ({placeholders})
+                      AND id NOT IN ({','.join('?' for _ in seen)})""",
+                (*frontier, *seen),
+            ).fetchall()
+        next_frontier = set()
+        for r in rows:
+            child = _fetch_email(db, r["id"])
+            if child and child["id"] not in seen:
+                add(child)
+                next_frontier.add(child["id"])
+        frontier = next_frontier
+
+    thread.sort(key=lambda e: e.get("date_received") or e.get("date_sent") or "")
+    return thread
 
 
 def _fetch_chat(db, source_id: int):
@@ -414,25 +546,28 @@ def _fetch_timeline_event(db, source_id: int):
 def open_item_dialog(db, *, source: str, source_id: int):
     """Show the content of an item. Read-only viewer."""
     if source == "email":
-        row = _fetch_email(db, source_id)
-        if not row:
+        focal = _fetch_email(db, source_id)
+        if not focal:
             st.error(f"Email #{source_id} not found")
             return
-        st.markdown(f"### {row['subject'] or '(no subject)'}")
-        st.caption(
-            f"From **{row['sender_name'] or row['sender_email']}** "
-            f"({row['sender_email']}) · "
-            f"{row['date_received'] or row['date_sent'] or '?'}"
-        )
-        to_str = _format_recipients(row["recipients"])
-        cc_str = _format_recipients(row["cc"])
-        if to_str:
-            st.caption(f"To: {to_str}")
-        if cc_str:
-            st.caption(f"Cc: {cc_str}")
-        if row["has_attachments"]:
-            st.caption("📎 has attachments")
-        st.divider()
+        # Subject is the same across the thread; show once at top
+        st.markdown(f"### {focal['subject'] or '(no subject)'}")
+
+        thread = _fetch_email_thread(db, source_id)
+        seen_hashes: dict[str, dict] = {}  # content_hash → {email_date, filename}
+
+        # Render each message in chronological order. Most-recent (which
+        # is also the focal one if it's the latest reply) is expanded.
+        for idx, msg in enumerate(thread):
+            is_focal = msg["id"] == source_id
+            is_last = idx == len(thread) - 1
+            _render_email_message(
+                db, msg,
+                expanded=is_focal or is_last,
+                is_focal=is_focal,
+                seen_hashes=seen_hashes,
+            )
+        return  # rest of the email branch superseded by per-message rendering
 
         # Pre-fetch attachments so we can inline cid: images into the body
         # AND know which to hide from the bottom Attachments list.
