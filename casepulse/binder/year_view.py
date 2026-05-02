@@ -128,24 +128,12 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
     counts = week_activity_counts(db, case_id=case_id, year=year)
     stats = year_stats(db, case_id=case_id, year=year)
 
-    # Heat strip — 52 narrow clickable cells. Visual gradient kept via
-    # HTML on top (no clicks); the row of small buttons below is what
-    # the user clicks. Two-state Streamlit button colour (primary if
-    # the week is above 30% of peak intensity) is the best Streamlit
-    # gives us short of a custom component.
-    st.caption(f"Activity density · {year} — click any week to jump there")
+    # Single heat strip — 52 clickable buttons, type=primary when the
+    # week is above 30% of peak intensity (gives a 2-tone visual hint),
+    # secondary otherwise. Click any cell → jumps to that week's first
+    # day in Month view. Hover tooltip shows the week number + count.
+    st.caption(f"Activity density · {year} — click any week to jump to its month")
     max_count = max(counts) or 1
-    cells_html = "".join(
-        f"<div title='Week {w} · {counts[w]} items' "
-        f"style='flex:1;height:24px;background:{_density_color(counts[w]/max_count)};"
-        f"border-radius:2px;'></div>"
-        for w in range(1, 53)
-    )
-    st.markdown(
-        f"<div style='display:flex;gap:2px'>{cells_html}</div>",
-        unsafe_allow_html=True,
-    )
-    # 52 tiny clickable cells right below the gradient
     heat_cols = st.columns(52, gap="small")
     for i, w in enumerate(range(1, 53)):
         intensity = counts[w] / max_count if max_count else 0

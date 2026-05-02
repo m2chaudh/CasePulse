@@ -105,13 +105,18 @@ if case_id is None:
     st.stop()
 
 # View tabs
-# `binder_view` is the *canonical* state and CAN be written from other
-# components (year-view click handlers etc.). The radio widget uses a
-# separate key (`binder_view_widget`) — Streamlit forbids writing to a
-# widget-bound key after the widget renders, so we keep the two
-# decoupled and sync them.
+# `binder_view` is the *canonical* state. The radio uses a separate key
+# (`binder_view_widget`) so other components can programmatically write
+# to `binder_view` without hitting Streamlit's "can't write to a
+# widget-bound key after instantiation" rule. We sync the widget key
+# from the canonical key BEFORE the radio renders, so a programmatic
+# change to `binder_view` is reflected on the next run.
 if "binder_view" not in st.session_state:
     st.session_state["binder_view"] = "month"
+# CRITICAL: sync widget key from canonical BEFORE radio renders, every run.
+# Streamlit otherwise uses the stale widget-key value and overrides any
+# programmatic change to `binder_view`.
+st.session_state["binder_view_widget"] = st.session_state["binder_view"]
 
 view_row = st.columns([3, 7])
 with view_row[0]:
