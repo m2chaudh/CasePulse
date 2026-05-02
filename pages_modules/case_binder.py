@@ -12,6 +12,7 @@ from casepulse.binder.year_view import render_year_view
 from casepulse.binder.add_entry_form import open_add_entry_dialog
 from casepulse.binder.attach_dialog import open_attach_dialog
 from casepulse.binder.open_dialog import open_item_dialog
+from casepulse.binder.density_bar import render_month_density, render_week_density
 from casepulse.binder.filter_chips_builtin import BUILTIN_CHIPS, chip_to_filter
 from casepulse.ui.workflow_help import (
     compute_workflow_state, render_workflow_help, WorkflowState,
@@ -175,6 +176,13 @@ chip_filter = chip_to_filter(st.session_state["binder_chip_id"])
 if view == "year":
     render_year_view(db, case_id=case_id, year=int(anchor_iso[:4]))
 else:
+    # Density indicator above the calendar — week-cells for month view,
+    # day-cells for week/day view. Hover shows the count per cell.
+    if view == "month":
+        render_month_density(db, case_id=case_id, anchor_iso=anchor_iso)
+    elif view in ("week", "day"):
+        render_week_density(db, case_id=case_id, anchor_iso=anchor_iso)
+
     items = aggregate(
         db, case_id=case_id,
         date_start=_view_start(view, anchor_iso),

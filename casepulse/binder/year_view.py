@@ -128,31 +128,40 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
     counts = week_activity_counts(db, case_id=case_id, year=year)
     stats = year_stats(db, case_id=case_id, year=year)
 
-    st.caption(f"Activity density · {year} — click any week to jump there")
+    # Visual heat strip — 52 colored HTML cells with intensity gradient.
+    # Intensity = count[w] / max_count, mapped to a 5-step color ramp.
+    st.caption(f"Activity density · {year}")
     max_count = max(counts) or 1
-    # Render the heat strip as a row of 52 clickable buttons. We use
-    # button type=primary for high-density weeks (>50% intensity) and
-    # secondary for the rest, so the strip still gives a visual hint.
-    # Each button label is the ISO week number (small font via inline
-    # CSS embedded in the help-tooltip text on hover).
-    heat_cols = st.columns(52, gap="small")
-    for i, w in enumerate(range(1, 53)):
-        intensity = counts[w] / max_count if max_count else 0
-        btype = "primary" if intensity > 0.5 else "secondary"
-        with heat_cols[i]:
-            if st.button(
-                str(w),
-                key=f"yr_heat_{year}_{w}",
-                use_container_width=True,
-                type=btype,
-                help=f"Week {w} of {year} — {counts[w]} items",
-            ):
-                from datetime import datetime as _dt
-                try:
-                    first_day = _dt.fromisocalendar(year, w, 1).date()
-                except ValueError:
-                    first_day = date(year, 1, 1)
-                st.session_state["binder_anchor_date"] = first_day.isoformat()
+    cells_html = "".join(
+        f"<div title='Week {w} · {counts[w]} items' "
+        f"style='flex:1;height:32px;background:{_density_color(counts[w]/max_count)};"
+        f"border-radius:2px;'></div>"
+        for w in range(1, 53)
+    )
+    st.markdown(
+        f"<div style='display:flex;gap:2px'>{cells_html}</div>",
+        unsafe_allow_html=True,
+    )
+    # Month labels under the strip — line up with weeks
+    month_labels = (
+        "<div style='display:flex;justify-content:space-between;"
+        "font-size:0.7em;opacity:0.6;margin-top:2px'>"
+        + "".join(f"<span>{m}</span>" for m in
+                   ["Jan","Feb","Mar","Apr","May","Jun",
+                    "Jul","Aug","Sep","Oct","Nov","Dec"])
+        + "</div>"
+    )
+    st.markdown(month_labels, unsafe_allow_html=True)
+
+    # Clickable month-jump row right under the heat strip.
+    st.caption("Jump to a month")
+    month_btn_cols = st.columns(12, gap="small")
+    import calendar as _cal
+    for i, m in enumerate(range(1, 13)):
+        with month_btn_cols[i]:
+            if st.button(_cal.month_abbr[m], key=f"yr_jump_month_{year}_{m}",
+                          use_container_width=True):
+                st.session_state["binder_anchor_date"] = f"{year:04d}-{m:02d}-01"
                 st.session_state["binder_view"] = "month"
                 st.rerun()
 
