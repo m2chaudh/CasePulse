@@ -161,16 +161,37 @@ sel_val = st.session_state["binder_selected_date"]
 selected_day = date.fromisoformat(sel_val) if isinstance(sel_val, str) \
     else date.fromordinal(sel_val)
 
-# Filter chips row
-chip_cols = st.columns(len(BUILTIN_CHIPS))
+# Filter chips row — active chip renders as primary so the user sees
+# which filter is in effect. Click a different chip → set state + rerun
+# so the type=primary applies on the next render.
 if "binder_chip_id" not in st.session_state:
     st.session_state["binder_chip_id"] = "all"
+chip_id = st.session_state["binder_chip_id"]
+
+chip_cols = st.columns(len(BUILTIN_CHIPS))
 for i, c in enumerate(BUILTIN_CHIPS):
     label = f"{c['emoji']} {c['label']}".strip()
+    is_active = c["id"] == chip_id
     with chip_cols[i]:
-        if st.button(label, key=f"binder_chip_{c['id']}"):
-            st.session_state["binder_chip_id"] = c["id"]
-chip_filter = chip_to_filter(st.session_state["binder_chip_id"])
+        if st.button(
+            label,
+            key=f"binder_chip_{c['id']}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True,
+        ):
+            if c["id"] != chip_id:
+                st.session_state["binder_chip_id"] = c["id"]
+                st.rerun()
+chip_filter = chip_to_filter(chip_id)
+
+# Show what's filtered (and how to clear) so 0-result chips don't look broken
+if chip_id != "all":
+    active_chip = next((c for c in BUILTIN_CHIPS if c["id"] == chip_id), None)
+    if active_chip:
+        st.caption(
+            f"Filter: **{active_chip['emoji']} {active_chip['label']}** · "
+            "click **All** to clear"
+        )
 
 # Render the selected view
 if view == "year":
