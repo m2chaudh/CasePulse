@@ -214,3 +214,82 @@ def render_counsel_form(case_id: int, default_date: str) -> dict:
                 "response_due_date": response_due_date or None,
             }
     return {}
+
+
+def save_personal_event(
+    db, *, case_id: int, date_str: str, time_str: str,
+    time_end: str, location: str, evidence_relevance: str,
+    witness_ids: list[int], photo_metadata_ids: list[int],
+    document_ids: list[int], attachment_ids: list[int],
+    email_ids: list[int],
+) -> int:
+    md = PersonalEventMetadata(
+        time_end=time_end or None,
+        location=location,
+        evidence_relevance=evidence_relevance,
+    )
+    title = location or "Personal event"
+    entry_id = create_binder_entry(
+        db, case_id=case_id, date=date_str, time=time_str,
+        category=BinderCategory.PERSONAL_EVENT,
+        title=title, summary="", metadata=md,
+    )
+    pairs: list[tuple[str, int]] = []
+    pairs += [("witness", w) for w in witness_ids]
+    pairs += [("photo", p) for p in photo_metadata_ids]
+    pairs += [("document", d) for d in document_ids]
+    pairs += [("attachment", a) for a in attachment_ids]
+    pairs += [("email", e) for e in email_ids]
+    for ftype, fid in pairs:
+        create_item_link(
+            db, case_id=case_id,
+            from_type=ftype, from_id=fid,
+            to_type="timeline_event", to_id=entry_id,
+            relationship="part_of",
+        )
+    return entry_id
+
+
+def render_personal_event_form(db, case_id: int, default_date: str) -> dict:
+    """Render the personal-event form with multi-selects pulled from DB."""
+    with db._get_conn() as conn:
+        wrows = conn.execute(
+            "SELECT id, name FROM witnesses WHERE case_id=?", (case_id,),
+        ).fetchall()
+        drows = conn.execute(
+            """SELECT d.id, d.filename FROM documents d
+               JOIN evidence_tags t ON t.item_type='document' AND t.item_id=d.id
+               WHERE t.case_id=?""", (case_id,)).fetchall()
+    witness_opts = {f"{r['name']} (#{r['id']})": r["id"] for r in wrows}
+    doc_opts = {f"{r['filename']} (#{r['id']})": r["id"] for r in drows}
+
+    with st.form("binder_form_personal", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            date_str = st.text_input("Date (YYYY-MM-DD)", value=default_date)
+            time_str = st.text_input("Start time (HH:MM)", value="")
+            time_end = st.text_input("End time (HH:MM)", value="")
+        with c2:
+            location = st.text_input("Location", value="")
+            evidence_relevance = st.selectbox(
+                "Evidence relevance",
+                ["context", "alibi", "corroboration", "contradiction"],
+            )
+        witnesses_pick = st.multiselect("Witnesses", list(witness_opts.keys()))
+        documents_pick = st.multiselect("Documents", list(doc_opts.keys()))
+        st.caption(
+            "Photos / attachments / emails — link via '+ Link' on the day drawer "
+            "after creating the event (Phase B)."
+        )
+        submitted = st.form_submit_button("Save personal event", type="primary")
+        if submitted:
+            return {
+                "date_str": date_str, "time_str": time_str,
+                "time_end": time_end, "location": location,
+                "evidence_relevance": evidence_relevance,
+                "witness_ids": [witness_opts[w] for w in witnesses_pick],
+                "photo_metadata_ids": [],
+                "document_ids": [doc_opts[d] for d in documents_pick],
+                "attachment_ids": [], "email_ids": [],
+            }
+    return {}

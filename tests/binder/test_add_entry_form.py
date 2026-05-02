@@ -92,3 +92,41 @@ def test_save_counsel_correspondence_with_email(tmp_db_with_case):
             (eid, case_id),
         ).fetchone()
     assert row["legal_issue"] == "counsel_correspondence"
+
+
+from casepulse.binder.add_entry_form import save_personal_event
+from casepulse.binder.repository import list_links_to
+
+
+def test_save_personal_event_writes_item_links(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    with db._get_conn() as conn:
+        # Seed a witness — adapt INSERT columns to actual witnesses schema if different
+        wcur = conn.execute(
+            """INSERT INTO witnesses (case_id, name, witness_type)
+               VALUES (?, 'Sarah', 'fact')""", (case_id,))
+        witness_id = wcur.lastrowid
+        dcur = conn.execute(
+            """INSERT INTO documents (filename, file_path, content_hash, created_at)
+               VALUES ('a.pdf','/tmp/a.pdf','h','2024-03-14T08:00:00')""")
+        doc_id = dcur.lastrowid
+        conn.execute(
+            "INSERT INTO evidence_tags (item_type, item_id, case_id) VALUES ('document', ?, ?)",
+            (doc_id, case_id))
+
+    entry_id = save_personal_event(
+        db, case_id=case_id, date_str="2024-03-14", time_str="19:30",
+        time_end="22:00", location="Sarah's residence",
+        evidence_relevance="alibi",
+        witness_ids=[witness_id], photo_metadata_ids=[],
+        document_ids=[doc_id], attachment_ids=[], email_ids=[],
+    )
+    row = get_binder_entry(db, entry_id)
+    md = json.loads(row["metadata_json"])
+    assert "witness_ids" not in md
+    assert "photo_metadata_ids" not in md
+    in_links = list_links_to(db, case_id=case_id,
+                              to_type="timeline_event", to_id=entry_id)
+    types_ids = sorted((r["from_type"], r["from_id"]) for r in in_links)
+    assert types_ids == sorted([("witness", witness_id), ("document", doc_id)])
+    assert all(r["relationship"] == "part_of" for r in in_links)
