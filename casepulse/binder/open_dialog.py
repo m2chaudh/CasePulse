@@ -1,9 +1,15 @@
 """Open dialog — shows the content of an aggregated item by source type.
 
-Reuses casepulse.case_theory.ui.email_renderer for emails (preserves the
-nice pre-wrap + thread-collapse rendering); plain text otherwise.
+For emails: renders the original HTML body (sanitised) when available so
+paragraphing / formatting is preserved, splits on common thread
+boundaries (Gmail 'On ... wrote:', Outlook 'From: ... Sent: ...',
+'-----Original Message-----', 'Begin forwarded message:'), and shows
+each earlier message in its own expander.
 """
 from __future__ import annotations
+import json
+import re
+from html import escape
 import streamlit as st
 
 
@@ -58,6 +64,133 @@ def _fetch_photo(db, source_id: int):
         ).fetchone()
 
 
+def _format_recipients(raw) -> str:
+    """Format a recipients/cc JSON string as 'Name <email>, ...'."""
+    if not raw:
+        return ""
+    try:
+        people = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return str(raw)
+    if not isinstance(people, list):
+        return str(raw)
+    parts = []
+    for p in people:
+        if not isinstance(p, dict):
+            parts.append(str(p))
+            continue
+        name = (p.get("name") or "").strip()
+        email = (p.get("email") or "").strip()
+        if name and email:
+            parts.append(f"{name} <{email}>")
+        elif email:
+            parts.append(email)
+        elif name:
+            parts.append(name)
+    return ", ".join(parts) or str(raw)
+
+
+def _sanitize_html(html: str) -> str:
+    """Strip dangerous / overriding HTML so the email body renders inside
+    Streamlit without escaping our theme. Uses BeautifulSoup which is
+    already in requirements.txt."""
+    if not html:
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return escape(html)
+    soup = BeautifulSoup(html, "lxml")
+    # Drop tags that override our chrome or run code
+    for sel in ("script", "style", "iframe", "object", "embed", "meta", "link", "base"):
+        for tag in soup.find_all(sel):
+            tag.decompose()
+    # Drop event handlers + javascript: hrefs
+    for tag in soup.find_all(True):
+        for attr in list(tag.attrs):
+            if attr.lower().startswith("on"):
+                del tag[attr]
+            elif attr.lower() in ("href", "src"):
+                v = tag.get(attr) or ""
+                if isinstance(v, str) and v.strip().lower().startswith("javascript:"):
+                    del tag[attr]
+    body = soup.find("body")
+    return str(body) if body else str(soup)
+
+
+# Boundary regexes for splitting plain-text email bodies into thread
+# messages. Each regex matches the START of a previous message header.
+# DOTALL on the Gmail pattern lets "." match newlines so "On <date>...
+# wrote:" splits that span email-address-on-its-own-line still match.
+_BOUNDARIES = [
+    # Gmail: "On Mon, Aug 19, 2024 at 1:10 PM Mani Chaudhary <\nx@y\n> wrote:"
+    re.compile(r"^On\s.+?wrote:\s*$",
+               re.MULTILINE | re.DOTALL | re.IGNORECASE),
+    # Outlook: "From: ..." followed within ~3 lines by "Sent:" or "Date:"
+    re.compile(
+        r"^From:\s.+\r?\n(?:.*\r?\n){0,3}?(?:Sent|Date):\s",
+        re.MULTILINE | re.IGNORECASE,
+    ),
+    # Apple Mail / generic
+    re.compile(r"^Begin forwarded message:\s*$", re.MULTILINE | re.IGNORECASE),
+    # Old-style forward marker
+    re.compile(r"^-{2,}\s*Original Message\s*-{2,}\s*$", re.MULTILINE | re.IGNORECASE),
+]
+
+
+def _split_thread(body: str) -> list[str]:
+    """Split an email body into [latest, earlier_1, earlier_2, ...]
+    using common Gmail/Outlook/Apple thread boundaries."""
+    if not body:
+        return []
+    cuts = []
+    for rx in _BOUNDARIES:
+        for m in rx.finditer(body):
+            cuts.append(m.start())
+    if not cuts:
+        return [body.rstrip()]
+    cuts = sorted(set(cuts))
+    parts = []
+    prev = 0
+    for c in cuts:
+        chunk = body[prev:c].rstrip()
+        if chunk.strip():
+            parts.append(chunk)
+        prev = c
+    tail = body[prev:].rstrip()
+    if tail.strip():
+        parts.append(tail)
+    return parts
+
+
+def _plaintext_to_html(text: str) -> str:
+    """Render a plain-text email chunk as basic HTML — escape, then
+    convert blank-line-separated paragraphs into <p>, single newlines
+    into <br>."""
+    if not text:
+        return ""
+    paragraphs = re.split(r"\n\s*\n", text)
+    out = []
+    for p in paragraphs:
+        if not p.strip():
+            continue
+        out.append("<p>" + escape(p).replace("\n", "<br>") + "</p>")
+    return "\n".join(out) or "<p>(empty)</p>"
+
+
+def _peek_thread_header(chunk: str) -> str:
+    """Pull a one-line preview from a thread chunk — the first
+    'From:' line or the 'On ... wrote:' line — to use as expander label."""
+    for line in chunk.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.lower().startswith("from:") or s.lower().startswith("on "):
+            return s[:140]
+        return s[:140]
+    return "(earlier message)"
+
+
 def _fetch_timeline_event(db, source_id: int):
     with db._get_conn() as conn:
         return conn.execute(
@@ -82,35 +215,46 @@ def open_item_dialog(db, *, source: str, source_id: int):
             f"({row['sender_email']}) · "
             f"{row['date_received'] or row['date_sent'] or '?'}"
         )
-        if row["recipients"]:
-            st.caption(f"To: {row['recipients']}")
-        if row["cc"]:
-            st.caption(f"Cc: {row['cc']}")
+        to_str = _format_recipients(row["recipients"])
+        cc_str = _format_recipients(row["cc"])
+        if to_str:
+            st.caption(f"To: {to_str}")
+        if cc_str:
+            st.caption(f"Cc: {cc_str}")
         if row["has_attachments"]:
             st.caption("📎 has attachments")
         st.divider()
-        body = row["body_text"] or row["body_html"] or "(no body)"
-        # email_renderer.render_html returns a dict — 'current' is the latest
-        # message, 'earlier' is the forwarded chain (or None). Render current
-        # inline; tuck earlier into an expander.
-        try:
-            from casepulse.case_theory.ui.email_renderer import render_html
-            rendered = render_html(body)
+
+        if row["body_html"]:
+            # Prefer the HTML body — preserves paragraphing, formatting,
+            # nested-quote styling done by the original mail client.
+            safe = _sanitize_html(row["body_html"])
             st.markdown(
-                f"<div class='reading-content'>{rendered['current']}</div>",
+                f"<div class='reading-content email-body'>{safe}</div>",
                 unsafe_allow_html=True,
             )
-            if rendered.get("earlier"):
-                with st.expander("Show earlier in thread", expanded=False):
-                    st.markdown(
-                        f"<div class='reading-content'>{rendered['earlier']}</div>",
-                        unsafe_allow_html=True,
-                    )
-        except Exception:
-            st.markdown(
-                f"<div class='reading-content'><pre>{body}</pre></div>",
-                unsafe_allow_html=True,
-            )
+        else:
+            # Fall back to plain text. Split on common thread boundaries
+            # so each previous message lives in its own expander.
+            body = row["body_text"] or "(no body)"
+            parts = _split_thread(body)
+            if not parts:
+                st.markdown("<p>(empty)</p>", unsafe_allow_html=True)
+            else:
+                # First chunk is the latest message — render inline
+                st.markdown(
+                    f"<div class='reading-content'>{_plaintext_to_html(parts[0])}</div>",
+                    unsafe_allow_html=True,
+                )
+                # Each subsequent chunk = one earlier message in the thread
+                for i, chunk in enumerate(parts[1:], start=1):
+                    label = f"↪ {_peek_thread_header(chunk)}"
+                    with st.expander(label, expanded=(i == 1)):
+                        st.markdown(
+                            f"<div class='reading-content'>"
+                            f"{_plaintext_to_html(chunk)}</div>",
+                            unsafe_allow_html=True,
+                        )
 
     elif source == "chat":
         row = _fetch_chat(db, source_id)
