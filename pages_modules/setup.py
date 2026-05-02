@@ -12,9 +12,26 @@ from casepulse.setup_wizard import (
     save_installed_modules, get_default_selections,
 )
 from casepulse.case_theory.ui import page_help
+from casepulse.storage.database import Database
+from casepulse.ui.workflow_help import (
+    compute_workflow_state, render_workflow_help, WorkflowState,
+)
 
 # If setup is already done, show settings view
 setup_done = is_setup_complete()
+
+# Render workflow help at the top of the page
+_db = Database()
+with _db._get_conn() as _conn:
+    _row = _conn.execute("SELECT id FROM cases ORDER BY id LIMIT 1").fetchone()
+if _row:
+    _wstate = compute_workflow_state(_db, case_id=_row["id"])
+    render_workflow_help(
+        _wstate,
+        default_open=not (_wstate.has_email or _wstate.has_document),
+    )
+else:
+    render_workflow_help(WorkflowState(), default_open=True)
 
 if setup_done:
     st.markdown("## Module Settings")
