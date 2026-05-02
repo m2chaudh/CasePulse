@@ -66,7 +66,9 @@ def preview_exhibit_labels(case_id: int, db: Database, count: int = 5) -> list[s
     return labels
 
 
-# Legal issue categories for family + criminal cases
+# Legal issue categories for family + criminal cases.
+# These are the built-in defaults. Users can add custom issues through the
+# Cases page; merged via `get_issues_for_type()` below.
 LEGAL_ISSUES = {
     "family": [
         ("custody", "Custody / Decision-Making"),
@@ -79,12 +81,16 @@ LEGAL_ISSUES = {
         ("false_allegations", "False Allegations"),
         ("parenting_coord", "Parenting Coordination"),
         ("cas_involvement", "CAS Involvement"),
+        ("ocl_involvement", "OCL (Office of the Children's Lawyer)"),
         ("therapy", "Therapy / Counselling"),
         ("travel", "Travel / Mobility"),
         ("communication", "Communication Issues"),
         ("settlement", "Settlement Discussions"),
         ("court_order", "Court Orders"),
         ("contempt", "Contempt / Non-Compliance"),
+        ("counsel_correspondence", "Counsel Correspondence"),
+        ("lawyer_change", "Change of Lawyer / Counsel"),
+        ("court_filing", "Court Filing / Pleading"),
     ],
     "criminal": [
         ("false_accusation", "False Accusation Defence"),
@@ -97,6 +103,9 @@ LEGAL_ISSUES = {
         ("statement_inconsistency", "Statement Inconsistency"),
         ("character", "Character Evidence"),
         ("timeline_dispute", "Timeline / Dates in Dispute"),
+        ("counsel_correspondence", "Counsel Correspondence"),
+        ("lawyer_change", "Change of Lawyer / Counsel"),
+        ("court_filing", "Court Filing / Pleading"),
     ],
 }
 
@@ -109,4 +118,102 @@ FLAGS = [
     ("privileged", "Privileged (Attorney-Client)"),
     ("corroborating", "Corroborating"),
     ("contradicting", "Contradicting"),
+    ("affidavit", "Sworn Affidavit"),
+    ("court_filed", "Filed with Court"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Custom issues + flags (persisted in app_settings)
+# ---------------------------------------------------------------------------
+
+import json
+from typing import Optional
+
+
+def _load_custom(db, key: str) -> list:
+    try:
+        with db._get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?", (key,),
+            ).fetchone()
+        if row and row["value"]:
+            data = json.loads(row["value"])
+            return data if isinstance(data, list) else []
+    except Exception:
+        pass
+    return []
+
+
+def _save_custom(db, key: str, items: list) -> None:
+    with db._get_conn() as conn:
+        conn.execute(
+            """INSERT INTO app_settings (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (key, json.dumps(items)),
+        )
+
+
+def get_custom_issues(db, case_type: str) -> list[tuple[str, str]]:
+    raw = _load_custom(db, f"legal_issues.custom_{case_type}")
+    return [(d["code"], d["label"]) for d in raw if "code" in d and "label" in d]
+
+
+def get_custom_flags(db) -> list[tuple[str, str]]:
+    raw = _load_custom(db, "flags.custom")
+    return [(d["code"], d["label"]) for d in raw if "code" in d and "label" in d]
+
+
+def get_issues_for_type(db, case_type: str) -> list[tuple[str, str]]:
+    """Return built-in + user-added issues for a case type."""
+    builtin = list(LEGAL_ISSUES.get(case_type, []))
+    builtin_codes = {c for c, _ in builtin}
+    custom = [c for c in get_custom_issues(db, case_type) if c[0] not in builtin_codes]
+    return builtin + custom
+
+
+def get_flags(db) -> list[tuple[str, str]]:
+    """Return built-in + user-added flags."""
+    builtin_codes = {c for c, _ in FLAGS}
+    custom = [c for c in get_custom_flags(db) if c[0] not in builtin_codes]
+    return list(FLAGS) + custom
+
+
+def add_custom_issue(db, case_type: str, code: str, label: str) -> None:
+    code = code.strip().lower().replace(" ", "_")
+    label = label.strip()
+    if not code or not label:
+        raise ValueError("code and label are required")
+    if code in {c for c, _ in LEGAL_ISSUES.get(case_type, [])}:
+        raise ValueError(f"'{code}' is a built-in issue and can't be re-added")
+    items = _load_custom(db, f"legal_issues.custom_{case_type}")
+    if any(d.get("code") == code for d in items):
+        return  # already custom
+    items.append({"code": code, "label": label})
+    _save_custom(db, f"legal_issues.custom_{case_type}", items)
+
+
+def remove_custom_issue(db, case_type: str, code: str) -> None:
+    items = _load_custom(db, f"legal_issues.custom_{case_type}")
+    items = [d for d in items if d.get("code") != code]
+    _save_custom(db, f"legal_issues.custom_{case_type}", items)
+
+
+def add_custom_flag(db, code: str, label: str) -> None:
+    code = code.strip().lower().replace(" ", "_")
+    label = label.strip()
+    if not code or not label:
+        raise ValueError("code and label are required")
+    if code in {c for c, _ in FLAGS}:
+        raise ValueError(f"'{code}' is a built-in flag and can't be re-added")
+    items = _load_custom(db, "flags.custom")
+    if any(d.get("code") == code for d in items):
+        return
+    items.append({"code": code, "label": label})
+    _save_custom(db, "flags.custom", items)
+
+
+def remove_custom_flag(db, code: str) -> None:
+    items = _load_custom(db, "flags.custom")
+    items = [d for d in items if d.get("code") != code]
+    _save_custom(db, "flags.custom", items)
