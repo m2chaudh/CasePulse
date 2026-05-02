@@ -255,3 +255,56 @@ def list_links_to(
 def delete_item_link(db: Database, link_id: int) -> None:
     with db._get_conn() as conn:
         conn.execute("DELETE FROM item_links WHERE id = ?", (link_id,))
+
+
+# ---------------------------------------------------------------------------
+# Binder suggestions
+# ---------------------------------------------------------------------------
+
+def create_suggestion(
+    db: Database, *, case_id: int, kind: str, payload: dict,
+) -> int:
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO binder_suggestions (case_id, kind, payload_json, status)
+               VALUES (?, ?, ?, 'pending')""",
+            (case_id, kind, json.dumps(payload)),
+        )
+        return cur.lastrowid
+
+
+def list_pending_suggestions(
+    db: Database, *, case_id: int, kind: Optional[str] = None,
+) -> list[dict]:
+    where = "case_id = ? AND status = 'pending'"
+    args: list = [case_id]
+    if kind is not None:
+        where += " AND kind = ?"
+        args.append(kind)
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT id, case_id, kind, payload_json, status, created_at
+                FROM binder_suggestions WHERE {where} ORDER BY created_at DESC, id DESC""",
+            args,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def accept_suggestion(db: Database, suggestion_id: int) -> None:
+    with db._get_conn() as conn:
+        conn.execute(
+            """UPDATE binder_suggestions
+               SET status='accepted', resolved_at=datetime('now')
+               WHERE id=?""",
+            (suggestion_id,),
+        )
+
+
+def dismiss_suggestion(db: Database, suggestion_id: int) -> None:
+    with db._get_conn() as conn:
+        conn.execute(
+            """UPDATE binder_suggestions
+               SET status='dismissed', resolved_at=datetime('now')
+               WHERE id=?""",
+            (suggestion_id,),
+        )

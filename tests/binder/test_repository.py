@@ -13,6 +13,8 @@ from casepulse.binder.repository import (
     upsert_relevant_sender, list_relevant_senders,
     deactivate_relevant_sender,
     create_item_link, list_links_from, list_links_to, delete_item_link,
+    create_suggestion, list_pending_suggestions,
+    accept_suggestion, dismiss_suggestion,
 )
 
 
@@ -152,3 +154,23 @@ def test_item_link_delete(tmp_db_with_case):
                                relationship="part_of")
     delete_item_link(db, link_id)
     assert list_links_from(db, case_id=case_id, from_type="document", from_id=1) == []
+
+
+def test_suggestion_lifecycle(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    sid = create_suggestion(
+        db, case_id=case_id, kind="counsel_entry",
+        payload={"email_id": 10, "party": "crown"},
+    )
+    pending = list_pending_suggestions(db, case_id=case_id)
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "counsel_entry"
+    accept_suggestion(db, sid)
+    assert list_pending_suggestions(db, case_id=case_id) == []
+
+
+def test_suggestion_dismiss(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    sid = create_suggestion(db, case_id=case_id, kind="dedup", payload={})
+    dismiss_suggestion(db, sid)
+    assert list_pending_suggestions(db, case_id=case_id) == []
