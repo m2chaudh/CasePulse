@@ -75,6 +75,26 @@ THEMES = {
         "font":      "-apple-system, 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif",
         "radius":    "6px",
     },
+    "low_blue_sepia": {
+        "name": "Low Blue · Sepia",
+        "kind": "light",
+        "vibe": "old-book sepia",
+        "blurb": "Warm sand paper, burnt sienna accent. Low-blue palette for daytime.",
+        "bg":        "#f7ecd6",
+        "bg2":       "#ede0c2",
+        "bg3":       "#e3d2ad",
+        "text":      "#3d2f1f",
+        "muted":     "#7a6448",
+        "rule":      "#cdb988",
+        "primary":   "#a85b1e",   # burnt sienna — no blue
+        "secondary": "#7a4222",
+        "yellow":    "#f0e09c",
+        "ok":        "#5a6a2a",
+        "warn":      "#a8741e",
+        "err":       "#a83a2a",
+        "font":      "'Charter', 'Iowan Old Style', 'Georgia', ui-serif, serif",
+        "radius":    "2px",
+    },
     # ---------- DARK ----------
     "solarized_dark": {
         "name": "Solarized Dark",
@@ -135,6 +155,26 @@ THEMES = {
         "err":       "#ff5555",
         "font":      "ui-sans-serif, -apple-system, 'Inter', 'Fira Sans', system-ui, sans-serif",
         "radius":    "6px",
+    },
+    "low_blue_amber": {
+        "name": "Low Blue · Amber",
+        "kind": "dark",
+        "vibe": "candlelight library",
+        "blurb": "Warm dark amber, copper accent. Minimal blue light for late nights.",
+        "bg":        "#1f1813",   # deep warm brown
+        "bg2":       "#2a1f17",   # warm panel
+        "bg3":       "#3a2d23",   # cards / hover
+        "text":      "#e9d8b8",   # warm cream
+        "muted":     "#a89478",   # warm gray-brown
+        "rule":      "#3a2d23",
+        "primary":   "#d4974a",   # amber — no blue
+        "secondary": "#c46e3e",   # rusty orange
+        "yellow":    "#3a2c14",
+        "ok":        "#a3b96a",
+        "warn":      "#e2a23a",
+        "err":       "#d97553",
+        "font":      "ui-sans-serif, -apple-system, 'Source Sans 3', system-ui, sans-serif",
+        "radius":    "4px",
     },
 }
 
