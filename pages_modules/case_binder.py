@@ -104,32 +104,29 @@ if case_id is None:
     render_workflow_help(WorkflowState(), default_open=True)
     st.stop()
 
-# View tabs
-# `binder_view` is the *canonical* state. The radio uses a separate key
-# (`binder_view_widget`) so other components can programmatically write
-# to `binder_view` without hitting Streamlit's "can't write to a
-# widget-bound key after instantiation" rule. We sync the widget key
-# from the canonical key BEFORE the radio renders, so a programmatic
-# change to `binder_view` is reflected on the next run.
+# View tabs.
+# Streamlit gotcha: a widget bound to a session_state key can't be
+# written from later code in the same run, AND syncing the widget key
+# every run wipes the user's manual click. Solution: the radio uses
+# `binder_view` as its key directly (so manual clicks update it), and
+# any *programmatic* switch (year-view heat-cell click, mini-month
+# button etc.) writes to a one-shot `_binder_view_pending` key that's
+# applied BEFORE the radio renders on the next run.
+if "_binder_view_pending" in st.session_state:
+    pending = st.session_state.pop("_binder_view_pending")
+    if pending in ("year", "month", "week", "day"):
+        st.session_state["binder_view"] = pending  # writable BEFORE widget renders
+
 if "binder_view" not in st.session_state:
     st.session_state["binder_view"] = "month"
-# CRITICAL: sync widget key from canonical BEFORE radio renders, every run.
-# Streamlit otherwise uses the stale widget-key value and overrides any
-# programmatic change to `binder_view`.
-st.session_state["binder_view_widget"] = st.session_state["binder_view"]
 
 view_row = st.columns([3, 7])
 with view_row[0]:
-    _options = ["year", "month", "week", "day"]
     view = st.radio(
-        "View", _options,
+        "View", ["year", "month", "week", "day"],
         horizontal=True,
-        index=_options.index(st.session_state["binder_view"]),
-        key="binder_view_widget",
+        key="binder_view",
     )
-if view != st.session_state["binder_view"]:
-    st.session_state["binder_view"] = view
-    st.rerun()
 
 # Date state — initialise before the nav row uses it
 if "binder_anchor_date" not in st.session_state:

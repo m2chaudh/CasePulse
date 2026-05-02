@@ -152,7 +152,7 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
                 except ValueError:
                     first_day = date(year, 1, 1)
                 st.session_state["binder_anchor_date"] = first_day.isoformat()
-                st.session_state["binder_view"] = "month"
+                st.session_state["_binder_view_pending"] = "month"
                 st.rerun()
     # Month labels under the strip — line up with weeks
     month_labels = (
@@ -225,7 +225,7 @@ def _render_mini_month_clickable(year: int, month: int, day_cats: dict[str, set[
                   key=f"yr_month_{year}_{month}",
                   use_container_width=True):
         st.session_state["binder_anchor_date"] = f"{year:04d}-{month:02d}-01"
-        st.session_state["binder_view"] = "month"
+        st.session_state["_binder_view_pending"] = "month"
         st.rerun()
 
     cal_obj = cal.Calendar(firstweekday=6)
@@ -261,7 +261,7 @@ def _render_mini_month_clickable(year: int, month: int, day_cats: dict[str, set[
                                   use_container_width=True, type=btn_type):
                         st.session_state["binder_selected_date"] = iso
                         st.session_state["binder_anchor_date"] = iso
-                        st.session_state["binder_view"] = "month"
+                        st.session_state["_binder_view_pending"] = "month"
                         st.rerun()
                 else:
                     st.markdown("<div>&nbsp;</div>", unsafe_allow_html=True)
