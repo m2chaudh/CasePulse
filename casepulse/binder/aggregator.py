@@ -7,6 +7,30 @@ import json
 from casepulse.binder.models import AggregatedItem, ChipFilter
 from casepulse.storage.database import Database
 
+
+def _format_recipients_inline(raw, *, limit: int = 4) -> str:
+    """Turn a recipients/cc JSON string into 'Alice, Bob, +2 more'."""
+    if not raw:
+        return ""
+    try:
+        people = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return str(raw)[:80]
+    if not isinstance(people, list):
+        return str(raw)[:80]
+    names = []
+    for p in people:
+        if not isinstance(p, dict):
+            continue
+        name = (p.get("name") or "").strip()
+        email = (p.get("email") or "").strip()
+        names.append(name or email)
+    if not names:
+        return ""
+    if len(names) <= limit:
+        return ", ".join(names)
+    return ", ".join(names[:limit]) + f", +{len(names) - limit} more"
+
 BINDER_CATEGORIES = (
     "court_appearance", "disclosure",
     "counsel_correspondence", "personal_event",
@@ -104,13 +128,15 @@ def _query_emails(
             continue
         sender = r["sender_name"] or r["sender_email"] or ""
         title = f"{sender} · {r['subject'] or '(no subject)'}"
+        recipients = _format_recipients_inline(r["recipients"])
+        summary = f"to {recipients}" if recipients else ""
         out.append(AggregatedItem(
             when=when,
             source="email",
             source_id=r["id"],
             category="email",
             title=title,
-            summary=r["recipients"] or "",
+            summary=summary,
             metadata={"sender_email": r["sender_email"]},
             has_attachment=bool(r["has_attachments"]),
         ))
@@ -363,10 +389,13 @@ def _query_attached_via_links(
             when = _combine(r["anchor_date"], r["anchor_time"])
             sender = r["sender_name"] or r["sender_email"] or ""
             title = f"{sender} · {r['subject'] or '(no subject)'}"
+            recipients = _format_recipients_inline(r["recipients"])
+            base = f"to {recipients}" if recipients else ""
+            summary = f"(attached to this day) {base}".strip()
             out.append(AggregatedItem(
                 when=when, source="email", source_id=r["id"],
                 category="email", title=title,
-                summary=f"(attached to this day) {r['recipients'] or ''}",
+                summary=summary,
                 metadata={"sender_email": r["sender_email"], "attached": True},
                 has_attachment=bool(r["has_attachments"]),
             ))
