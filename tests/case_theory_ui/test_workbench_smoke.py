@@ -1,7 +1,7 @@
 # tests/case_theory_ui/test_workbench_smoke.py
 def test_workbench_page_loads_with_no_case(page_test):
     """Page renders without errors when no case is selected."""
-    at = page_test("pages/1_Case_Theory.py")
+    at = page_test("pages_modules/case_theory.py")
     at.run()
     assert not at.exception
     # Expect a "no case selected" message
@@ -12,7 +12,7 @@ def test_workbench_page_loads_with_no_case(page_test):
 def test_workbench_creates_contradiction(page_test, tmp_db_with_case):
     """Submitting the new-contradiction form creates a row."""
     db, case_id = tmp_db_with_case
-    at = page_test("pages/1_Case_Theory.py")
+    at = page_test("pages_modules/case_theory.py")
     at.session_state.db = db
     at.run()
     assert not at.exception
@@ -54,7 +54,7 @@ def test_view_as_exhibit_button_present(page_test, tmp_db_with_case):
         source_table="emails", source_row_id=email_id,
     ))
     attach_evidence_to_argument(db, a.id, e.id, role=EvidenceRole.SUPPORTS)
-    at = page_test("pages/1_Case_Theory.py")
+    at = page_test("pages_modules/case_theory.py")
     at.session_state.db = db
     at.run()
     assert not at.exception
@@ -99,7 +99,7 @@ def test_workbench_renders_arguments_for_contradiction(page_test, tmp_db_with_ca
         argument_type=ArgumentType.ALIBI, strength=Strength.STRONG,
     ))
     # Use real DB path so the page can reopen it
-    at = page_test("pages/1_Case_Theory.py")
+    at = page_test("pages_modules/case_theory.py")
     at.session_state.db = db
     at.run()
     assert not at.exception
@@ -131,7 +131,7 @@ def test_argument_witness_statement_link(page_test, tmp_db_with_case):
         argument_id=a.id,
     ))
 
-    at = page_test("pages/1_Case_Theory.py")
+    at = page_test("pages_modules/case_theory.py")
     at.session_state.db = db
     at.run()
     assert not at.exception

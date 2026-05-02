@@ -7,7 +7,7 @@ ROOT = Path(__file__).parent.parent.parent
 
 
 def test_search_page_passes_sender_to_row_card():
-    text = (ROOT / "pages/2_Search.py").read_text()
+    text = (ROOT / "pages_modules/search.py").read_text()
     # Should pass sender/recipients to format_one_line_meta where source row has them
     assert "format_one_line_meta" in text
     assert "sender" in text
