@@ -186,7 +186,10 @@ def _day_categories_for_year(db, case_id, year) -> dict[str, set[str]]:
 
 def _render_mini_month_clickable(year: int, month: int, day_cats: dict[str, set[str]]):
     """Render a clickable mini-month — month name jumps to month view,
-    each day cell selects that day and switches to month view."""
+    each day cell selects that day and switches to month view.
+
+    Uses a flat 7-column grid (not week-by-week) so columns align
+    perfectly across all rows of the month."""
     import calendar as cal
     # Month-name button
     if st.button(f"**{cal.month_name[month]}**",
@@ -199,28 +202,40 @@ def _render_mini_month_clickable(year: int, month: int, day_cats: dict[str, set[
     cal_obj = cal.Calendar(firstweekday=6)
     weeks = cal_obj.monthdayscalendar(year, month)
 
-    # Day-of-week header
-    header_cols = st.columns(7)
-    for col, dow in zip(header_cols, ["S", "M", "T", "W", "T", "F", "S"]):
-        col.markdown(f"<div style='text-align:center;opacity:0.5;font-size:0.7em'>{dow}</div>",
-                     unsafe_allow_html=True)
-
-    # Days as buttons
+    # Flatten into a single sequence of cells (header + days), padded with
+    # blanks to maintain exact 7-column alignment.
+    cells: list[tuple[str, str | int]] = []
+    for dow in ["S", "M", "T", "W", "T", "F", "S"]:
+        cells.append(("dow", dow))
     for week in weeks:
-        day_cols = st.columns(7)
-        for col, day in zip(day_cols, week):
-            if day == 0:
-                continue
-            iso = f"{year:04d}-{month:02d}-{day:02d}"
-            categories = day_cats.get(iso, set())
-            btn_type = "primary" if categories else "secondary"
-            label = str(day)
-            if col.button(label, key=f"yr_day_{iso}",
-                           use_container_width=True, type=btn_type):
-                st.session_state["binder_selected_date"] = iso
-                st.session_state["binder_anchor_date"] = iso
-                st.session_state["binder_view"] = "month"
-                st.rerun()
+        for day in week:
+            cells.append(("day" if day else "blank", day))
+
+    # Render in a 7-wide grid — Streamlit creates one column-grid per row;
+    # because every row is exactly 7 cells with no breaks, each column
+    # has the same width and they line up vertically.
+    for row_start in range(0, len(cells), 7):
+        row = cells[row_start:row_start + 7]
+        cols = st.columns(7)
+        for col, (kind, val) in zip(cols, row):
+            with col:
+                if kind == "dow":
+                    st.markdown(
+                        f"<div style='text-align:center;opacity:0.5;font-size:0.72em;line-height:1.2'>{val}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif kind == "day":
+                    iso = f"{year:04d}-{month:02d}-{val:02d}"
+                    categories = day_cats.get(iso, set())
+                    btn_type = "primary" if categories else "secondary"
+                    if st.button(str(val), key=f"yr_day_{iso}",
+                                  use_container_width=True, type=btn_type):
+                        st.session_state["binder_selected_date"] = iso
+                        st.session_state["binder_anchor_date"] = iso
+                        st.session_state["binder_view"] = "month"
+                        st.rerun()
+                else:
+                    st.markdown("<div>&nbsp;</div>", unsafe_allow_html=True)
 
 
 def _render_mini_month(year: int, month: int, day_cats: dict[str, set[str]]):

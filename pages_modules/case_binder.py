@@ -103,12 +103,26 @@ if case_id is None:
     st.stop()
 
 # View tabs
+# `binder_view` is the *canonical* state and CAN be written from other
+# components (year-view click handlers etc.). The radio widget uses a
+# separate key (`binder_view_widget`) — Streamlit forbids writing to a
+# widget-bound key after the widget renders, so we keep the two
+# decoupled and sync them.
+if "binder_view" not in st.session_state:
+    st.session_state["binder_view"] = "month"
+
 view_row = st.columns([3, 7])
 with view_row[0]:
+    _options = ["year", "month", "week", "day"]
     view = st.radio(
-        "View", ["year", "month", "week", "day"],
-        horizontal=True, key="binder_view", index=1,
+        "View", _options,
+        horizontal=True,
+        index=_options.index(st.session_state["binder_view"]),
+        key="binder_view_widget",
     )
+if view != st.session_state["binder_view"]:
+    st.session_state["binder_view"] = view
+    st.rerun()
 
 # Date state — initialise before the nav row uses it
 if "binder_anchor_date" not in st.session_state:
