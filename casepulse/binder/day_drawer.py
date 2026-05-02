@@ -34,6 +34,14 @@ def render_day_drawer(db, *, case_id: int, day: date, chip_filter=None) -> None:
     items = aggregate(db, case_id=case_id,
                       date_start=day, date_end=day, chip_filter=chip_filter)
 
+    # Tiny status line — exactly what the drawer is rendering. Useful for
+    # spotting state mismatches between calendar and drawer.
+    chip_label = (chip_filter.chip_id if chip_filter is not None else "all")
+    st.caption(
+        f"Drawer showing **{day.isoformat()}** · filter **{chip_label}** · "
+        f"{len(items)} items"
+    )
+
     cols = st.columns([1, 4, 1])
     with cols[0]:
         if st.button("‹ Prev", key="binder_day_prev"):
