@@ -45,41 +45,27 @@ html, body, .stApp,
   font-family: var(--cp-font);
 }}
 
-header[data-testid="stHeader"], [data-testid="stHeader"] {{
-  background: var(--cp-bg) !important;
+header[data-testid="stHeader"] {{
+  background: transparent;
   border-bottom: 1px solid var(--cp-rule);
 }}
 [data-testid="stToolbar"] {{ background: transparent; }}
 
-/* ===== Sidebar ===== */
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] > div,
-[data-testid="stSidebar"] > div:first-child {{
+/* ===== Sidebar (background only — let Streamlit handle nav text colors) ===== */
+section[data-testid="stSidebar"] {{
   background: var(--cp-bg2) !important;
   border-right: 1px solid var(--cp-rule);
 }}
 
-section[data-testid="stSidebar"] *,
 section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] span,
 section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] div,
 section[data-testid="stSidebar"] li,
-section[data-testid="stSidebar"] a {{
-  color: var(--cp-text) !important;
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {{
+  color: var(--cp-text);
 }}
 
-section[data-testid="stSidebar"] .stCaption,
-section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
-section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] * {{
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {{
   color: var(--cp-muted) !important;
-}}
-
-section[data-testid="stSidebar"] [aria-current="page"],
-section[data-testid="stSidebar"] a[aria-current="page"] {{
-  background: var(--cp-bg3) !important;
-  color: var(--cp-primary) !important;
-  border-radius: var(--cp-radius);
 }}
 
 /* ===== Typography ===== */
@@ -90,8 +76,7 @@ h1, h2, h3, h4, h5, h6 {{
 }}
 
 p, li,
-[data-testid="stMarkdownContainer"],
-[data-testid="stMarkdownContainer"] * {{
+[data-testid="stMarkdownContainer"] {{
   color: var(--cp-text);
   font-family: var(--cp-font);
 }}
@@ -231,9 +216,7 @@ details[data-testid="stExpander"] {{
 }}
 
 [data-testid="stExpander"] summary,
-[data-testid="stExpander"] [role="button"],
-[data-testid="stExpander"] *,
-details[data-testid="stExpander"] summary span {{
+[data-testid="stExpander"] [role="button"] {{
   color: var(--cp-text) !important;
   font-family: var(--cp-font);
 }}
@@ -290,8 +273,6 @@ details[data-testid="stExpander"] summary span {{
   color: var(--cp-text) !important;
   border: 1px solid var(--cp-rule);
 }}
-
-[data-testid="stAlert"] * {{ color: var(--cp-text) !important; }}
 
 [data-testid="stNotification"] {{
   background: var(--cp-bg2) !important;
