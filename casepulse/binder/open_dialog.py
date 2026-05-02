@@ -92,6 +92,61 @@ def _fetch_attachments(db, email_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+_CID_RE = re.compile(r'''(<img[^>]*?\bsrc\s*=\s*["'])cid:([^"'>]+)(["'])''',
+                     re.IGNORECASE)
+
+
+def _resolve_cid_images(html: str, attachments: list[dict]) -> tuple[str, set[int]]:
+    """Replace `<img src="cid:SOMEID">` tags in the HTML body with
+    `data:image/...;base64,...` URLs computed from the matching
+    attachment's bytes. Returns (resolved_html, set_of_inline_ids) so
+    the caller can drop those from the bottom Attachments section.
+
+    Match is heuristic: looks for an attachment whose filename contains
+    the cid (or its base before '@'). Common patterns like
+    'image001.png' / 'cid:image001@0123' resolve cleanly."""
+    inline_ids: set[int] = set()
+    if not html or not attachments:
+        return (html or ""), inline_ids
+
+    # Index image attachments by lowercase filename for the heuristic
+    img_atts = [a for a in attachments if _is_image(a.get("content_type") or "",
+                                                     a.get("filename") or "")]
+    if not img_atts:
+        return html, inline_ids
+
+    def _data_url(att: dict) -> str | None:
+        path = att.get("file_path")
+        if not path:
+            return None
+        try:
+            p = Path(path)
+            if not (p.exists() and p.is_file()):
+                return None
+            with p.open("rb") as f:
+                data = f.read()
+            ctype = att.get("content_type") or "image/png"
+            return f"data:{ctype};base64,{base64.b64encode(data).decode('ascii')}"
+        except OSError:
+            return None
+
+    def _replace(m: re.Match) -> str:
+        prefix, cid, quote = m.group(1), m.group(2), m.group(3)
+        cid_lower = cid.lower()
+        cid_base = cid_lower.split("@", 1)[0]
+        for att in img_atts:
+            fn = (att.get("filename") or "").lower()
+            stem = fn.rsplit(".", 1)[0] if "." in fn else fn
+            if cid_lower in fn or cid_base in fn or stem == cid_base:
+                url = _data_url(att)
+                if url:
+                    inline_ids.add(att["id"])
+                    return f"{prefix}{url}{quote}"
+        return m.group(0)  # unchanged
+
+    return _CID_RE.sub(_replace, html), inline_ids
+
+
 def _render_attachment_inline(att: dict, *, key_prefix: str) -> None:
     """Render a single attachment inside an expander. Images shown
     inline; PDFs/docs show extracted text + path; other types show
@@ -379,10 +434,18 @@ def open_item_dialog(db, *, source: str, source_id: int):
             st.caption("📎 has attachments")
         st.divider()
 
+        # Pre-fetch attachments so we can inline cid: images into the body
+        # AND know which to hide from the bottom Attachments list.
+        all_atts = _fetch_attachments(db, row["id"]) if row["has_attachments"] else []
+        inline_att_ids: set[int] = set()
+
         if row["body_html"]:
             # Prefer the HTML body — preserves paragraphing, formatting,
             # nested-quote styling done by the original mail client.
-            safe = _sanitize_html(row["body_html"])
+            html_with_inline_imgs, inline_att_ids = _resolve_cid_images(
+                row["body_html"], all_atts,
+            )
+            safe = _sanitize_html(html_with_inline_imgs)
             st.markdown(
                 f"<div class='reading-content email-body'>{safe}</div>",
                 unsafe_allow_html=True,
@@ -410,16 +473,25 @@ def open_item_dialog(db, *, source: str, source_id: int):
                             unsafe_allow_html=True,
                         )
 
-        # Attachments section — one collapsed expander per attachment.
-        # Images render inline; PDFs/docs show extracted text + path;
-        # everything else shows metadata + Download button.
-        if row["has_attachments"]:
-            atts = _fetch_attachments(db, row["id"])
-            if atts:
+        # Attachments section — only the *non-inline* attachments. The
+        # ones already rendered as cid:-resolved <img> in the body
+        # (signatures, inline screenshots, logos) don't need a duplicate
+        # entry below.
+        if all_atts:
+            visible_atts = [a for a in all_atts if a["id"] not in inline_att_ids]
+            if visible_atts:
                 st.divider()
-                st.markdown(f"#### 📎 Attachments ({len(atts)})")
-                for att in atts:
+                label = f"#### 📎 Attachments ({len(visible_atts)})"
+                if inline_att_ids:
+                    label += f"  ·  *{len(inline_att_ids)} inline image(s) shown above*"
+                st.markdown(label)
+                for att in visible_atts:
                     _render_attachment_inline(att, key_prefix=f"email_{row['id']}")
+            elif inline_att_ids:
+                st.caption(
+                    f"All {len(inline_att_ids)} attachment(s) are inline images "
+                    "in the body above (signatures, embedded screenshots, etc.)."
+                )
 
     elif source == "chat":
         row = _fetch_chat(db, source_id)
