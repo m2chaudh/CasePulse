@@ -10,6 +10,7 @@ from casepulse.binder.calendar_component import render_calendar
 from casepulse.binder.day_drawer import render_day_drawer
 from casepulse.binder.year_view import render_year_view
 from casepulse.binder.add_entry_form import open_add_entry_dialog
+from casepulse.binder.attach_dialog import open_attach_dialog
 from casepulse.binder.filter_chips_builtin import BUILTIN_CHIPS, chip_to_filter
 from casepulse.ui.workflow_help import (
     compute_workflow_state, render_workflow_help, WorkflowState,
@@ -166,12 +167,17 @@ else:
         chip_filter=chip_filter,
     )
     clicked = render_calendar(items, view=view, initial_date=anchor_iso)
-    if clicked:
+    if clicked and clicked != st.session_state.get("binder_selected_date"):
         st.session_state["binder_selected_date"] = clicked
+        st.rerun()
 
-# Day drawer always renders below
+# Day drawer always renders below — re-read selected_day in case it just changed
+sel_val = st.session_state["binder_selected_date"]
+selected_day = date.fromisoformat(sel_val) if isinstance(sel_val, str) \
+    else date.fromordinal(sel_val)
+
 st.divider()
-st.subheader("Selected day")
+st.caption("↓ Click a day above to view + edit its items here ↓")
 render_day_drawer(db, case_id=case_id, day=selected_day, chip_filter=chip_filter)
 
 # Empty-state — show workflow help if no data anywhere for this case
@@ -186,4 +192,10 @@ if st.session_state.pop("binder_open_add_entry", False):
     open_add_entry_dialog(
         db, case_id=case_id,
         default_date=st.session_state.get("binder_add_entry_date", anchor_iso),
+    )
+
+if st.session_state.pop("binder_open_attach", False):
+    open_attach_dialog(
+        db, case_id=case_id,
+        day=st.session_state.get("binder_attach_date", anchor_iso),
     )
