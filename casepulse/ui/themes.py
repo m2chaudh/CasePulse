@@ -1,182 +1,140 @@
 """Theme palettes + picker UI for CasePulse.
 
-Each theme is a flat dict of named colors. The active theme is persisted
-per-user in `app_settings` under the key `theme.active`. The reading-styles
-CSS is rebuilt against the active palette on every page render, so switching
-themes is instantaneous (one `st.rerun()`).
+Six curated themes, each with a distinct *vibe* — not just a different
+background tint. Each palette carries: background trio, text, muted text,
+rule, primary + secondary accent, status colors, font stack, corner radius.
 
-`.streamlit/config.toml` sets `base = "light"` so Streamlit's chrome opens
-sensibly. Dark themes from this file override with CSS — most widgets follow
-correctly via inheritance; a few system pieces (scrollbars, native menus) may
-fall back to the light base. Switching between light and dark groups shows
-the active theme cleanly in the body, header, and sidebar.
+The active theme is persisted in `app_settings` under the key `theme.active`.
+The reading-styles CSS is rebuilt against the active palette on every page
+render via `casepulse.case_theory.ui.reading_styles.inject_global()`, so
+switching is instantaneous (one `st.rerun()`).
 """
 from __future__ import annotations
 import streamlit as st
 
 
 THEMES = {
-    # ----- Lights -----
+    # ---------- LIGHT ----------
     "solarized_light": {
         "name": "Solarized Light",
         "kind": "light",
-        "blurb": "Warm cream — Ethan Schoonover's reading-optimised palette.",
-        "bg":       "#fdf6e3",
-        "bg2":      "#eee8d5",
-        "text":     "#586e75",
-        "muted":    "#93a1a1",
-        "rule":     "#d3cbb7",
-        "primary":  "#268bd2",
-        "yellow":   "#fbedc4",
-        "quote_bg": "#f5efd5",
-        "ok":       "#859900",
-        "warn":     "#b58900",
-        "err":      "#dc322f",
-    },
-    "catppuccin_latte": {
-        "name": "Catppuccin Latte",
-        "kind": "light",
-        "blurb": "Cool lavender-tinted soft white. Modern, popular in 2024+.",
-        "bg":       "#eff1f5",
-        "bg2":      "#e6e9ef",
-        "text":     "#4c4f69",
-        "muted":    "#6c6f85",
-        "rule":     "#bcc0cc",
-        "primary":  "#1e66f5",
-        "yellow":   "#fff4cf",
-        "quote_bg": "#dce0e8",
-        "ok":       "#40a02b",
-        "warn":     "#df8e1d",
-        "err":      "#d20f39",
-    },
-    "github_light": {
-        "name": "GitHub Light",
-        "kind": "light",
-        "blurb": "Crisp white, blue accent. Familiar, professional.",
-        "bg":       "#ffffff",
-        "bg2":      "#f6f8fa",
-        "text":     "#1f2328",
-        "muted":    "#656d76",
-        "rule":     "#d0d7de",
-        "primary":  "#0969da",
-        "yellow":   "#fff8c5",
-        "quote_bg": "#f6f8fa",
-        "ok":       "#1a7f37",
-        "warn":     "#9a6700",
-        "err":      "#cf222e",
+        "vibe": "1970s typewriter paper",
+        "blurb": "Warm cream paper, slow blue. Designed for hours of reading.",
+        "bg":        "#fdf6e3",
+        "bg2":       "#eee8d5",
+        "bg3":       "#f5efd5",
+        "text":      "#586e75",
+        "muted":     "#93a1a1",
+        "rule":      "#d3cbb7",
+        "primary":   "#268bd2",   # warm blue
+        "secondary": "#cb4b16",   # orange — links/hover
+        "yellow":    "#fbedc4",
+        "ok":        "#859900",
+        "warn":      "#b58900",
+        "err":       "#dc322f",
+        "font":      "ui-sans-serif, -apple-system, 'Source Sans 3', system-ui, sans-serif",
+        "radius":    "4px",
     },
     "paper": {
         "name": "Paper",
         "kind": "light",
-        "blurb": "Tufte-style off-white, deep ink. Like reading on stationery.",
-        "bg":       "#fafaf7",
-        "bg2":      "#f1eee5",
-        "text":     "#2d2a26",
-        "muted":    "#7a7368",
-        "rule":     "#d6d2c7",
-        "primary":  "#1e6091",
-        "yellow":   "#f5e9b8",
-        "quote_bg": "#f1eee5",
-        "ok":       "#3d6b3a",
-        "warn":     "#9e6e2a",
-        "err":      "#a83232",
+        "vibe": "academic publication",
+        "blurb": "Parchment off-white, deep ink, serif body. Like reading a brief.",
+        "bg":        "#faf8f1",
+        "bg2":       "#f1ede0",
+        "bg3":       "#ebe6d4",
+        "text":      "#2d2a26",
+        "muted":     "#7a7368",
+        "rule":      "#cdc7b8",
+        "primary":   "#1e4d72",   # oxford blue
+        "secondary": "#8c1d18",   # claret
+        "yellow":    "#f5e9b8",
+        "ok":        "#3d6b3a",
+        "warn":      "#9e6e2a",
+        "err":       "#a83232",
+        "font":      "'Charter', 'Iowan Old Style', 'Georgia', ui-serif, serif",
+        "radius":    "0px",
     },
-    "atom_one_light": {
-        "name": "Atom One Light",
+    "github_light": {
+        "name": "GitHub Light",
         "kind": "light",
-        "blurb": "Editor classic — neutral whites, gentle blue accent.",
-        "bg":       "#fafafa",
-        "bg2":      "#eaeaeb",
-        "text":     "#383a42",
-        "muted":    "#a0a1a7",
-        "rule":     "#d0d0d3",
-        "primary":  "#4078f2",
-        "yellow":   "#f7e8a3",
-        "quote_bg": "#eaeaeb",
-        "ok":       "#50a14f",
-        "warn":     "#c18401",
-        "err":      "#e45649",
+        "vibe": "clean tech tool",
+        "blurb": "Crisp white, vivid blue. Familiar, professional.",
+        "bg":        "#ffffff",
+        "bg2":       "#f6f8fa",
+        "bg3":       "#eaeef2",
+        "text":      "#1f2328",
+        "muted":     "#656d76",
+        "rule":      "#d0d7de",
+        "primary":   "#0969da",
+        "secondary": "#cf222e",
+        "yellow":    "#fff8c5",
+        "ok":        "#1a7f37",
+        "warn":      "#9a6700",
+        "err":       "#cf222e",
+        "font":      "-apple-system, 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif",
+        "radius":    "6px",
     },
-    # ----- Darks -----
+    # ---------- DARK ----------
     "solarized_dark": {
         "name": "Solarized Dark",
         "kind": "dark",
-        "blurb": "Warm dark — same palette as Solarized Light, low strain.",
-        "bg":       "#002b36",
-        "bg2":      "#073642",
-        "text":     "#93a1a1",
-        "muted":    "#586e75",
-        "rule":     "#0a4451",
-        "primary":  "#268bd2",
-        "yellow":   "#3a3a1c",
-        "quote_bg": "#073642",
-        "ok":       "#859900",
-        "warn":     "#b58900",
-        "err":      "#dc322f",
+        "vibe": "amber terminal at night",
+        "blurb": "Warm dark teal, slow blue. Same colorimetry as Solarized Light.",
+        "bg":        "#002b36",
+        "bg2":       "#073642",
+        "bg3":       "#0a4451",
+        "text":      "#93a1a1",
+        "muted":     "#586e75",
+        "rule":      "#0a4451",
+        "primary":   "#268bd2",
+        "secondary": "#cb4b16",
+        "yellow":    "#3a3a1c",
+        "ok":        "#859900",
+        "warn":      "#b58900",
+        "err":       "#dc322f",
+        "font":      "ui-sans-serif, -apple-system, 'Source Sans 3', system-ui, sans-serif",
+        "radius":    "4px",
     },
     "nord": {
         "name": "Nord",
         "kind": "dark",
-        "blurb": "Cool arctic blue-gray. Calm and modern.",
-        "bg":       "#2e3440",
-        "bg2":      "#3b4252",
-        "text":     "#d8dee9",
-        "muted":    "#81a1c1",
-        "rule":     "#434c5e",
-        "primary":  "#88c0d0",
-        "yellow":   "#3b3a25",
-        "quote_bg": "#3b4252",
-        "ok":       "#a3be8c",
-        "warn":     "#ebcb8b",
-        "err":      "#bf616a",
+        "vibe": "scandinavian minimalist",
+        "blurb": "Cool arctic slate, ice blue. Calm and modern.",
+        "bg":        "#2e3440",
+        "bg2":       "#3b4252",
+        "bg3":       "#434c5e",
+        "text":      "#eceff4",
+        "muted":     "#81a1c1",
+        "rule":      "#4c566a",
+        "primary":   "#88c0d0",
+        "secondary": "#5e81ac",
+        "yellow":    "#3b3a25",
+        "ok":        "#a3be8c",
+        "warn":      "#ebcb8b",
+        "err":       "#bf616a",
+        "font":      "ui-sans-serif, -apple-system, 'Inter', system-ui, sans-serif",
+        "radius":    "4px",
     },
-    "catppuccin_mocha": {
-        "name": "Catppuccin Mocha",
+    "dracula": {
+        "name": "Dracula",
         "kind": "dark",
-        "blurb": "Rich dark with mauve accents. Trendy in 2024+.",
-        "bg":       "#1e1e2e",
-        "bg2":      "#181825",
-        "text":     "#cdd6f4",
-        "muted":    "#a6adc8",
-        "rule":     "#313244",
-        "primary":  "#89b4fa",
-        "yellow":   "#3a3624",
-        "quote_bg": "#181825",
-        "ok":       "#a6e3a1",
-        "warn":     "#f9e2af",
-        "err":      "#f38ba8",
-    },
-    "github_dark": {
-        "name": "GitHub Dark",
-        "kind": "dark",
-        "blurb": "Clean charcoal — GitHub's official dark.",
-        "bg":       "#0d1117",
-        "bg2":      "#161b22",
-        "text":     "#e6edf3",
-        "muted":    "#7d8590",
-        "rule":     "#30363d",
-        "primary":  "#2f81f7",
-        "yellow":   "#3a2c00",
-        "quote_bg": "#161b22",
-        "ok":       "#3fb950",
-        "warn":     "#d29922",
-        "err":      "#f85149",
-    },
-    "atom_one_dark": {
-        "name": "Atom One Dark",
-        "kind": "dark",
-        "blurb": "Editor classic dark — neutral, well-calibrated.",
-        "bg":       "#282c34",
-        "bg2":      "#21252b",
-        "text":     "#abb2bf",
-        "muted":    "#5c6370",
-        "rule":     "#3e4451",
-        "primary":  "#61afef",
-        "yellow":   "#3a3625",
-        "quote_bg": "#21252b",
-        "ok":       "#98c379",
-        "warn":     "#e5c07b",
-        "err":      "#e06c75",
+        "vibe": "cyberpunk neon",
+        "blurb": "Deep purple, hot pink. Bold contrast for late-night work.",
+        "bg":        "#282a36",
+        "bg2":       "#21222c",
+        "bg3":       "#44475a",
+        "text":      "#f8f8f2",
+        "muted":     "#bdbdbd",
+        "rule":      "#44475a",
+        "primary":   "#bd93f9",   # purple
+        "secondary": "#ff79c6",   # hot pink
+        "yellow":    "#f1fa8c",
+        "ok":        "#50fa7b",
+        "warn":      "#ffb86c",
+        "err":       "#ff5555",
+        "font":      "ui-sans-serif, -apple-system, 'Inter', 'Fira Sans', system-ui, sans-serif",
+        "radius":    "6px",
     },
 }
 
@@ -214,23 +172,39 @@ def set_active_theme(db, theme_id: str) -> None:
         )
 
 
+def _swatch_html(theme: dict) -> str:
+    """Five-color swatch HTML for a theme. Used in the picker preview."""
+    swatches = [theme["bg"], theme["bg2"], theme["text"], theme["primary"], theme["secondary"]]
+    cells = "".join(
+        f"<span style='display:inline-block;width:18px;height:18px;border-radius:3px;"
+        f"background:{c};margin-right:2px;border:1px solid rgba(0,0,0,0.1);'></span>"
+        for c in swatches
+    )
+    return f"<div style='display:inline-block'>{cells}</div>"
+
+
 def render_theme_picker(db, *, location: str = "main") -> None:
-    """Render the theme picker. `location` may be 'main' or 'sidebar'."""
+    """Render the theme picker. `location` may be 'main' or 'sidebar'.
+
+    Shows all themes side-by-side with name, vibe, blurb, and a five-color
+    swatch (bg / bg2 / text / primary / secondary). Click a theme to apply.
+    """
     target = st.sidebar if location == "sidebar" else st
     current_id = get_active_theme_id(db)
-    options = list(THEMES.keys())
-    labels = {tid: f"{THEMES[tid]['name']} · {THEMES[tid]['kind']}" for tid in options}
+
     target.markdown("### Theme")
-    target.caption("Pick a palette. The whole app re-renders immediately.")
-    chosen = target.selectbox(
-        "Active theme",
-        options,
-        index=options.index(current_id),
-        format_func=lambda k: labels[k],
-        key="theme_picker",
-        label_visibility="collapsed",
-    )
-    target.caption(THEMES[chosen]["blurb"])
-    if chosen != current_id:
-        set_active_theme(db, chosen)
-        st.rerun()
+    target.caption("Click a theme to apply. The whole app re-renders immediately.")
+
+    for tid, theme in THEMES.items():
+        is_active = tid == current_id
+        marker = "●" if is_active else "○"
+        cols = target.columns([1, 5])
+        with cols[0]:
+            st.markdown(_swatch_html(theme), unsafe_allow_html=True)
+        with cols[1]:
+            label = f"{marker} **{theme['name']}** · {theme['kind']}"
+            if st.button(label, key=f"theme_btn_{tid}",
+                          disabled=is_active, use_container_width=True):
+                set_active_theme(db, tid)
+                st.rerun()
+            st.caption(f"_{theme['vibe']}_ — {theme['blurb']}")
