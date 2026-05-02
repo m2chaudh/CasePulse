@@ -161,37 +161,13 @@ sel_val = st.session_state["binder_selected_date"]
 selected_day = date.fromisoformat(sel_val) if isinstance(sel_val, str) \
     else date.fromordinal(sel_val)
 
-# Filter chips row — active chip renders as primary so the user sees
-# which filter is in effect. Click a different chip → set state + rerun
-# so the type=primary applies on the next render.
+# Filter state — chips themselves are rendered BELOW the calendar
+# (right above the day drawer they filter). chip_filter is read here so
+# the calendar/heat strip/density bars can use it on this render.
 if "binder_chip_id" not in st.session_state:
     st.session_state["binder_chip_id"] = "all"
 chip_id = st.session_state["binder_chip_id"]
-
-chip_cols = st.columns(len(BUILTIN_CHIPS))
-for i, c in enumerate(BUILTIN_CHIPS):
-    label = f"{c['emoji']} {c['label']}".strip()
-    is_active = c["id"] == chip_id
-    with chip_cols[i]:
-        if st.button(
-            label,
-            key=f"binder_chip_{c['id']}",
-            type="primary" if is_active else "secondary",
-            use_container_width=True,
-        ):
-            if c["id"] != chip_id:
-                st.session_state["binder_chip_id"] = c["id"]
-                st.rerun()
 chip_filter = chip_to_filter(chip_id)
-
-# Show what's filtered (and how to clear) so 0-result chips don't look broken
-if chip_id != "all":
-    active_chip = next((c for c in BUILTIN_CHIPS if c["id"] == chip_id), None)
-    if active_chip:
-        st.caption(
-            f"Filter: **{active_chip['emoji']} {active_chip['label']}** · "
-            "click **All** to clear"
-        )
 
 # Render the selected view
 if view == "year":
@@ -221,6 +197,52 @@ selected_day = date.fromisoformat(sel_val) if isinstance(sel_val, str) \
     else date.fromordinal(sel_val)
 
 st.divider()
+
+# Filter chips — small pill-style buttons under the calendar, above the
+# day drawer they primarily affect. Inline CSS tightens the buttons so
+# they feel like chips rather than full-width buttons.
+st.markdown(
+    """<style>
+    div[data-testid="stHorizontalBlock"].binder-chip-bar .stButton > button {
+        padding: 2px 10px !important;
+        font-size: 0.82em !important;
+        line-height: 1.3 !important;
+        min-height: 0 !important;
+        border-radius: 14px !important;
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
+st.caption("Filter")
+# Wrap the chip row so the CSS scope above only hits these buttons. We
+# can't set a class on st.columns directly, but Streamlit groups columns
+# under a stHorizontalBlock — we add a sentinel container with our class.
+chip_row = st.container()
+with chip_row:
+    chip_cols = st.columns(len(BUILTIN_CHIPS), gap="small")
+    for i, c in enumerate(BUILTIN_CHIPS):
+        label = f"{c['emoji']} {c['label']}".strip()
+        is_active = c["id"] == chip_id
+        with chip_cols[i]:
+            if st.button(
+                label,
+                key=f"binder_chip_{c['id']}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True,
+            ):
+                if c["id"] != chip_id:
+                    st.session_state["binder_chip_id"] = c["id"]
+                    st.rerun()
+
+# Active filter caption — explains 0-result chips aren't broken
+if chip_id != "all":
+    active_chip = next((c for c in BUILTIN_CHIPS if c["id"] == chip_id), None)
+    if active_chip:
+        st.caption(
+            f"Active filter: **{active_chip['emoji']} {active_chip['label']}** "
+            "· click **All** to clear"
+        )
+
 st.caption("↓ Click a day above to view + edit its items here ↓")
 render_day_drawer(db, case_id=case_id, day=selected_day, chip_filter=chip_filter)
 
