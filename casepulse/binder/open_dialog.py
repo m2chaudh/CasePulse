@@ -9,11 +9,47 @@ each earlier message in its own expander. Attachments render inline
 show metadata + download).
 """
 from __future__ import annotations
+import base64
 import json
 import re
 from html import escape
 from pathlib import Path
 import streamlit as st
+
+
+# Cap inline-PDF rendering to keep base64 payloads small. Larger PDFs
+# fall back to extracted text + Download.
+_PDF_INLINE_LIMIT = 12 * 1024 * 1024  # 12 MB
+
+
+def _render_pdf_inline(file_path: str, height: int = 720) -> bool:
+    """Render the PDF via a base64 iframe so the browser's built-in
+    viewer handles layout/fonts/images correctly. Returns True on
+    success, False if the file is too large or unreadable."""
+    p = Path(file_path)
+    if not p.exists() or not p.is_file():
+        return False
+    size = p.stat().st_size
+    if size > _PDF_INLINE_LIMIT:
+        st.caption(
+            f"PDF is {_human_size(size)} — too large to preview inline. "
+            "Use Download to open it locally."
+        )
+        return False
+    try:
+        with p.open("rb") as f:
+            data = f.read()
+    except OSError:
+        return False
+    b64 = base64.b64encode(data).decode("ascii")
+    iframe = (
+        f'<iframe src="data:application/pdf;base64,{b64}" '
+        f'width="100%" height="{height}" type="application/pdf" '
+        f'style="border:1px solid var(--cp-rule);border-radius:6px;'
+        f'background:white"></iframe>'
+    )
+    st.markdown(iframe, unsafe_allow_html=True)
+    return True
 
 
 def _human_size(n) -> str:
@@ -100,11 +136,14 @@ def _render_attachment_inline(att: dict, *, key_prefix: str) -> None:
                 except Exception as e:
                     st.caption(f"(image preview failed: {e})")
             elif _is_pdf(ctype, filename):
-                # Streamlit has no native PDF viewer; surface the text
-                # and tell the user where to find the file.
+                # Render the PDF via the browser's built-in viewer for
+                # full fidelity (layout, fonts, embedded images, tables).
+                rendered = _render_pdf_inline(att["file_path"])
+                # Keep extracted text as a secondary view — useful for
+                # copy/paste and quick text search.
                 if att.get("extracted_text"):
-                    with st.container(border=True):
-                        st.caption("Extracted text (full PDF below)")
+                    label = "Extracted text" if rendered else "Extracted text (PDF preview unavailable)"
+                    with st.expander(label, expanded=not rendered):
                         st.markdown(
                             f"<div class='reading-content'><pre>"
                             f"{escape(att['extracted_text'][:8000])}"
@@ -112,7 +151,7 @@ def _render_attachment_inline(att: dict, *, key_prefix: str) -> None:
                             f"</pre></div>",
                             unsafe_allow_html=True,
                         )
-                else:
+                elif not rendered:
                     st.caption("No extracted text available. Use Download to open it locally.")
             elif att.get("extracted_text"):
                 # Plain text / DOCX / etc. — show extracted text
