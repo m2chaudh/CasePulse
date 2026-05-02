@@ -128,13 +128,16 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
     counts = week_activity_counts(db, case_id=case_id, year=year)
     stats = year_stats(db, case_id=case_id, year=year)
 
-    # Visual heat strip — 52 colored HTML cells with intensity gradient.
-    # Intensity = count[w] / max_count, mapped to a 5-step color ramp.
-    st.caption(f"Activity density · {year}")
+    # Heat strip — 52 narrow clickable cells. Visual gradient kept via
+    # HTML on top (no clicks); the row of small buttons below is what
+    # the user clicks. Two-state Streamlit button colour (primary if
+    # the week is above 30% of peak intensity) is the best Streamlit
+    # gives us short of a custom component.
+    st.caption(f"Activity density · {year} — click any week to jump there")
     max_count = max(counts) or 1
     cells_html = "".join(
         f"<div title='Week {w} · {counts[w]} items' "
-        f"style='flex:1;height:32px;background:{_density_color(counts[w]/max_count)};"
+        f"style='flex:1;height:24px;background:{_density_color(counts[w]/max_count)};"
         f"border-radius:2px;'></div>"
         for w in range(1, 53)
     )
@@ -142,6 +145,27 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
         f"<div style='display:flex;gap:2px'>{cells_html}</div>",
         unsafe_allow_html=True,
     )
+    # 52 tiny clickable cells right below the gradient
+    heat_cols = st.columns(52, gap="small")
+    for i, w in enumerate(range(1, 53)):
+        intensity = counts[w] / max_count if max_count else 0
+        btype = "primary" if intensity > 0.3 else "secondary"
+        with heat_cols[i]:
+            if st.button(
+                "·",
+                key=f"yr_heat_{year}_{w}",
+                use_container_width=True,
+                type=btype,
+                help=f"Week {w} of {year} — {counts[w]} items",
+            ):
+                from datetime import datetime as _dt
+                try:
+                    first_day = _dt.fromisocalendar(year, w, 1).date()
+                except ValueError:
+                    first_day = date(year, 1, 1)
+                st.session_state["binder_anchor_date"] = first_day.isoformat()
+                st.session_state["binder_view"] = "month"
+                st.rerun()
     # Month labels under the strip — line up with weeks
     month_labels = (
         "<div style='display:flex;justify-content:space-between;"
