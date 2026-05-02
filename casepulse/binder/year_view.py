@@ -153,40 +153,6 @@ def render_year_view(db: Database, *, case_id: int, year: int) -> None:
     )
     st.markdown(month_labels, unsafe_allow_html=True)
 
-    # Clickable month-jump row right under the heat strip.
-    st.caption("Jump to a month")
-    month_btn_cols = st.columns(12, gap="small")
-    import calendar as _cal
-    for i, m in enumerate(range(1, 13)):
-        with month_btn_cols[i]:
-            if st.button(_cal.month_abbr[m], key=f"yr_jump_month_{year}_{m}",
-                          use_container_width=True):
-                st.session_state["binder_anchor_date"] = f"{year:04d}-{m:02d}-01"
-                st.session_state["binder_view"] = "month"
-                st.rerun()
-
-    # Quick-jump: skip a day picker if the user knows the date
-    st.caption("Jump to a specific day in this year")
-    jump_cols = st.columns([3, 1])
-    with jump_cols[0]:
-        from datetime import date as _date
-        jump_to = st.date_input(
-            "Pick a day",
-            value=_date(year, 1, 1),
-            min_value=_date(year, 1, 1),
-            max_value=_date(year, 12, 31),
-            key=f"year_jump_{year}",
-            label_visibility="collapsed",
-        )
-    with jump_cols[1]:
-        if st.button("Open in Month view", use_container_width=True,
-                      key=f"year_jump_btn_{year}", type="primary"):
-            iso = jump_to.isoformat()
-            st.session_state["binder_selected_date"] = iso
-            st.session_state["binder_anchor_date"] = iso
-            st.session_state["binder_view"] = "month"
-            st.rerun()
-
     st.caption(
         "12 mini-calendars · click a month name to jump to its Month view, "
         "or a day to select it"
