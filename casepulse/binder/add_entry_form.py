@@ -293,3 +293,39 @@ def render_personal_event_form(db, case_id: int, default_date: str) -> dict:
                 "attachment_ids": [], "email_ids": [],
             }
     return {}
+
+
+@st.dialog("Add Binder Entry")
+def open_add_entry_dialog(db, *, case_id: int, default_date: str) -> None:
+    """Top-level Add Entry dialog. Renders a category radio + the matching
+    sub-form. On submit, dispatches to the correct save_* handler."""
+    cat = st.radio(
+        "Category",
+        ["court_appearance", "disclosure", "counsel_correspondence", "personal_event"],
+        format_func=lambda c: c.replace("_", " ").title(),
+        horizontal=True,
+    )
+    if cat == "court_appearance":
+        fields = render_court_form(case_id, default_date)
+        if fields:
+            save_court_appearance(db, case_id=case_id, **fields)
+            st.success("Court appearance saved.")
+            st.rerun()
+    elif cat == "disclosure":
+        fields = render_disclosure_form(case_id, default_date)
+        if fields:
+            save_disclosure(db, case_id=case_id, **fields)
+            st.success("Disclosure entry saved.")
+            st.rerun()
+    elif cat == "counsel_correspondence":
+        fields = render_counsel_form(case_id, default_date)
+        if fields:
+            save_counsel_correspondence(db, case_id=case_id, **fields)
+            st.success("Counsel correspondence saved.")
+            st.rerun()
+    elif cat == "personal_event":
+        fields = render_personal_event_form(db, case_id, default_date)
+        if fields:
+            save_personal_event(db, case_id=case_id, **fields)
+            st.success("Personal event saved.")
+            st.rerun()
