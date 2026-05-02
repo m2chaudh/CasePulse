@@ -28,6 +28,7 @@ def aggregate(
     items.extend(_query_attachments(db, case_id, date_start, date_end))
     items.extend(_query_photos(db, case_id, date_start, date_end))
     items.sort(key=lambda it: it.when)
+    _populate_cross_refs(db, case_id, items)
     return items
 
 
@@ -239,3 +240,64 @@ def _query_photos(
                       "source_id": r["source_row_id"]},
         ))
     return out
+
+
+def _populate_cross_refs(
+    db: Database, case_id: int, items: list[AggregatedItem],
+) -> None:
+    if not items:
+        return
+    from casepulse.binder.models import CrossRef
+    by_key: dict[tuple[str, int], list] = {(it.source, it.source_id): [] for it in items}
+
+    with db._get_conn() as conn:
+        # Outgoing item_links — one query per from_type for clarity.
+        for ft in {it.source for it in items}:
+            ids = [it.source_id for it in items if it.source == ft]
+            if not ids:
+                continue
+            placeholders = ",".join("?" for _ in ids)
+            rows = conn.execute(
+                f"""SELECT from_type, from_id, to_type, to_id, relationship
+                    FROM item_links
+                    WHERE case_id=? AND from_type=? AND from_id IN ({placeholders})""",
+                (case_id, ft, *ids),
+            ).fetchall()
+            for r in rows:
+                key = (r["from_type"], r["from_id"])
+                if key in by_key:
+                    by_key[key].append(CrossRef(
+                        target_type=r["to_type"], target_id=r["to_id"],
+                        relationship=r["relationship"],
+                    ))
+
+        # argument_evidence rows. The actual schema uses evidence_id that
+        # references the evidence table, which holds source_table/source_row_id.
+        # Map each AggregatedItem.source to its db table name.
+        source_map = {
+            "email": "emails",
+            "chat": "chat_messages",
+            "document": "documents",
+            "attachment": "attachments",
+            "photo": "photo_metadata",
+            "timeline_event": "timeline_events",
+        }
+        for it in items:
+            db_table = source_map.get(it.source)
+            if not db_table:
+                continue
+            rows = conn.execute(
+                """SELECT ae.argument_id, ae.role
+                   FROM argument_evidence ae
+                   JOIN evidence ev ON ev.id = ae.evidence_id
+                   WHERE ev.source_table = ? AND ev.source_row_id = ?""",
+                (db_table, it.source_id),
+            ).fetchall()
+            for r in rows:
+                by_key[(it.source, it.source_id)].append(CrossRef(
+                    target_type="argument", target_id=r["argument_id"],
+                    relationship=r["role"] or "supports",
+                ))
+
+    for it in items:
+        it.cross_refs = by_key[(it.source, it.source_id)]

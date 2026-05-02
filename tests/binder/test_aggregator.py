@@ -173,3 +173,62 @@ def test_aggregate_attachments(tmp_db_with_case):
                       date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
     atts = [it for it in items if it.source == "attachment"]
     assert len(atts) == 1
+
+
+from casepulse.binder.repository import create_item_link
+
+
+def test_cross_refs_from_item_links(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    eid = _seed_email(db, case_id=case_id,
+                       date_received="2024-03-14T10:14:00",
+                       sender="x@y", subject="reply")
+    tl_id = create_binder_entry(
+        db, case_id=case_id, date="2024-03-14", time="09:00",
+        category=BinderCategory.COURT_APPEARANCE,
+        title="OCJ", summary="",
+        metadata=CourtAppearanceMetadata(forum=Forum.CRIMINAL),
+    )
+    create_item_link(db, case_id=case_id,
+                     from_type="email", from_id=eid,
+                     to_type="timeline_event", to_id=tl_id,
+                     relationship="responds_to")
+
+    items = aggregate(db, case_id=case_id,
+                      date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
+    email_item = next(it for it in items if it.source == "email")
+    assert any(cr.target_id == tl_id and cr.relationship == "responds_to"
+               for cr in email_item.cross_refs)
+
+
+def test_cross_refs_from_argument_evidence(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    eid = _seed_email(db, case_id=case_id,
+                       date_received="2024-03-14T10:14:00",
+                       sender="x@y", subject="hi")
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO contradictions (case_id, headline, status)
+               VALUES (?, 'C', 'draft')""", (case_id,))
+        contradiction_id = cur.lastrowid
+        cur = conn.execute(
+            """INSERT INTO arguments (contradiction_id, title, argument_type, strength)
+               VALUES (?, 'A', 'documentary', 'moderate')""",
+            (contradiction_id,))
+        arg_id = cur.lastrowid
+        # evidence table holds the source pointer; argument_evidence links argument -> evidence
+        cur = conn.execute(
+            """INSERT INTO evidence (evidence_kind, source_table, source_row_id)
+               VALUES ('email', 'emails', ?)""",
+            (eid,))
+        ev_id = cur.lastrowid
+        conn.execute(
+            """INSERT INTO argument_evidence (argument_id, evidence_id, role)
+               VALUES (?, ?, 'supports')""",
+            (arg_id, ev_id))
+    items = aggregate(db, case_id=case_id,
+                      date_start=date(2024, 3, 14), date_end=date(2024, 3, 14))
+    email_item = next(it for it in items if it.source == "email")
+    arg_refs = [cr for cr in email_item.cross_refs if cr.target_type == "argument"]
+    assert len(arg_refs) == 1
+    assert arg_refs[0].relationship == "supports"
