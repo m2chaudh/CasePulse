@@ -1,8 +1,8 @@
 [theme]
-# Solarized Light — Ethan Schoonover's reading-optimised palette.
-# Warm cream background and soft warm-gray text reduce eye strain on
-# long evidence-review sessions; the calm blue accent is for active UI
-# (buttons, links, the selected day in the calendar).
+# Default base — Streamlit's chrome (slider tracks, scrollbars, native
+# menus) opens with these values. The runtime theme picker overrides
+# everything else via CSS in casepulse.case_theory.ui.reading_styles.
+# Default = Solarized Light.
 base = "light"
 primaryColor = "#268bd2"
 backgroundColor = "#fdf6e3"

@@ -16,6 +16,7 @@ from casepulse.storage.database import Database
 from casepulse.ui.workflow_help import (
     compute_workflow_state, render_workflow_help, WorkflowState,
 )
+from casepulse.ui.themes import render_theme_picker
 
 # If setup is already done, show settings view
 setup_done = is_setup_complete()
@@ -32,6 +33,11 @@ if _row:
     )
 else:
     render_workflow_help(WorkflowState(), default_open=True)
+
+# Theme picker — sits between workflow help and module selection so it's
+# easy to find and try out without scrolling through the rest of Setup.
+with st.expander("Appearance · Theme", expanded=False):
+    render_theme_picker(_db)
 
 if setup_done:
     st.markdown("## Module Settings")

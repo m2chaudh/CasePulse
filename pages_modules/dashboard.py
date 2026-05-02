@@ -11,43 +11,8 @@ config: Config = st.session_state.config
 st.set_page_config(page_title="CasePulse Dashboard", layout="wide")
 inject_global()
 
-# Page-local CSS — colors harmonise with the Solarized Light theme
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin-bottom: 0;
-        color: #073642;
-    }
-    .sub-header {
-        font-size: 1rem;
-        color: #93a1a1;
-        margin-top: -10px;
-        margin-bottom: 30px;
-    }
-    .stat-card {
-        background: #eee8d5;
-        border-radius: 8px;
-        padding: 18px;
-        text-align: center;
-        border: 1px solid #d3cbb7;
-    }
-    .stat-number {
-        font-size: 1.9rem;
-        font-weight: 700;
-        color: #268bd2;
-    }
-    .stat-label {
-        font-size: 0.85rem;
-        color: #586e75;
-        margin-top: 4px;
-    }
-    .status-ok   { color: #859900; }
-    .status-warn { color: #b58900; }
-    .status-err  { color: #dc322f; }
-</style>
-""", unsafe_allow_html=True)
+# Dashboard styles (.main-header, .stat-card, etc.) are now defined globally
+# in casepulse.case_theory.ui.reading_styles based on the active theme palette.
 
 page_help.render("home")
 

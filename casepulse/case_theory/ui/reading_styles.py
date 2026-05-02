@@ -1,34 +1,26 @@
 # casepulse/case_theory/ui/reading_styles.py
 """Global CSS injection for reading-friendly typography.
 
-Two scopes:
-1. Global moderate max-width — pages stop stretching to 1440px+ on wide screens
-2. Tight `.reading-content` class — for long-form text surfaces (View source dialog,
-   Argument editor reasoning, document body, brief preview)
-
-Colors harmonise with the Solarized Light Streamlit theme set in
-`.streamlit/config.toml`. The Solarized palette was designed scientifically
-for low-strain reading; the constants below reuse its named hex values.
+Reads the active theme palette from `app_settings` (via `casepulse.ui.themes`)
+on every render, so switching themes via the picker re-renders the whole app
+in the new palette instantly.
 """
 import streamlit as st
 
 
-# Solarized Light palette — kept named so swapping the theme
-# (e.g. to Solarized Dark) only requires changing this block.
-SOL_BG       = "#fdf6e3"   # base3  — main background
-SOL_BG2      = "#eee8d5"   # base2  — secondary surface
-SOL_TEXT     = "#586e75"   # base01 — body text
-SOL_TEXT_MUT = "#93a1a1"   # base1  — muted / metadata
-SOL_RULE     = "#d3cbb7"   # blend  — subtle dividers / borders
-SOL_BLUE     = "#268bd2"   # blue   — links, primary actions
-SOL_YELLOW   = "#fbedc4"   # yellow tint — soft highlight (mark)
-SOL_QUOTE_BG = "#f5efd5"   # very light cream — blockquote panel
+def _build_css(theme: dict) -> str:
+    """Build the CSS string against a theme palette dict."""
+    return f"""
+/* Body — match the active theme so Streamlit's white default doesn't peek through */
+html, body, [data-testid="stApp"] {{
+  background: {theme["bg"]} !important;
+  color: {theme["text"]};
+}}
 
-
-GLOBAL_CSS = f"""
-/* Moderate global max-width — let pages breathe instead of stretching to 1440px */
+/* Moderate page width — readable on wide screens */
 .main .block-container {{
   max-width: 1100px;
+  background: {theme["bg"]};
 }}
 
 /* Tight reading column for long-form text */
@@ -38,7 +30,7 @@ GLOBAL_CSS = f"""
   font-family: ui-serif, Georgia, "Charter", "Times New Roman", serif;
   line-height: 1.7;
   font-size: 1.05em;
-  color: {SOL_TEXT};
+  color: {theme["text"]};
 }}
 
 .reading-content p {{
@@ -46,21 +38,21 @@ GLOBAL_CSS = f"""
 }}
 
 .reading-content blockquote {{
-  border-left: 3px solid {SOL_BLUE};
+  border-left: 3px solid {theme["primary"]};
   padding: 6px 14px;
   margin: 1em 0;
-  background: {SOL_QUOTE_BG};
-  color: {SOL_TEXT};
+  background: {theme["quote_bg"]};
+  color: {theme["text"]};
   font-style: italic;
   border-radius: 0 4px 4px 0;
 }}
 
 .reading-content mark,
 .reading-content mark#cited-highlight {{
-  background: {SOL_YELLOW};
+  background: {theme["yellow"]};
   padding: 1px 3px;
   border-radius: 2px;
-  color: {SOL_TEXT};
+  color: {theme["text"]};
 }}
 
 .reading-content pre {{
@@ -69,65 +61,141 @@ GLOBAL_CSS = f"""
   font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
   line-height: 1.6;
   font-size: 0.95em;
-  background: {SOL_BG2};
+  background: {theme["bg2"]};
   padding: 10px 14px;
   border-radius: 4px;
-  border: 1px solid {SOL_RULE};
+  border: 1px solid {theme["rule"]};
 }}
 
 .reading-content code {{
   font-family: ui-monospace, "SF Mono", "Menlo", monospace;
-  background: {SOL_BG2};
+  background: {theme["bg2"]};
   padding: 1px 5px;
   border-radius: 3px;
   font-size: 0.93em;
-  color: {SOL_TEXT};
+  color: {theme["text"]};
 }}
 
-/* Soften Streamlit chrome for a desktop-app feel */
+/* Soften Streamlit chrome */
 header[data-testid="stHeader"] {{
   background: transparent;
 }}
 
-/* Sidebar — secondary cream so it reads as a panel, not a slab */
+/* Sidebar — secondary background as a panel */
 section[data-testid="stSidebar"] {{
-  background: {SOL_BG2};
-  border-right: 1px solid {SOL_RULE};
+  background: {theme["bg2"]};
+  border-right: 1px solid {theme["rule"]};
+}}
+section[data-testid="stSidebar"] * {{
+  color: {theme["text"]};
+}}
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {{
+  color: {theme["muted"]} !important;
 }}
 
-/* Dividers — softer than Streamlit's default slate */
+/* Dividers */
 hr, [data-testid="stDivider"] hr {{
-  border-color: {SOL_RULE} !important;
+  border-color: {theme["rule"]} !important;
 }}
 
-/* Tighten Streamlit's heavy-bold default headings on cream */
-h1, h2, h3 {{
-  color: {SOL_TEXT};
+/* Headings — inherit theme text color, slightly reduced weight */
+h1, h2, h3, h4, h5, h6 {{
+  color: {theme["text"]};
   font-weight: 600;
 }}
 
-/* Captions — slightly muted */
+/* Captions */
 .stCaption, [data-testid="stCaptionContainer"] {{
-  color: {SOL_TEXT_MUT} !important;
+  color: {theme["muted"]} !important;
 }}
 
-/* Buttons — match Solarized blue accent and softer corners */
+/* Buttons — softer corners */
 .stButton > button {{
   border-radius: 4px;
 }}
+
+/* Metric tiles harmonise */
+[data-testid="stMetric"] {{
+  background: {theme["bg2"]};
+  border-radius: 8px;
+  padding: 14px 16px;
+  border: 1px solid {theme["rule"]};
+}}
+[data-testid="stMetricLabel"] {{
+  color: {theme["muted"]} !important;
+}}
+[data-testid="stMetricValue"] {{
+  color: {theme["primary"]} !important;
+}}
+
+/* Dashboard helpers — defined once globally so dashboard.py can drop its inline <style> */
+.main-header {{
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin-bottom: 0;
+  color: {theme["text"]};
+}}
+.sub-header {{
+  font-size: 1rem;
+  color: {theme["muted"]};
+  margin-top: -10px;
+  margin-bottom: 30px;
+}}
+.stat-card {{
+  background: {theme["bg2"]};
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+  border: 1px solid {theme["rule"]};
+}}
+.stat-number {{
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: {theme["primary"]};
+}}
+.stat-label {{
+  font-size: 0.85rem;
+  color: {theme["text"]};
+  margin-top: 4px;
+}}
+.status-ok   {{ color: {theme["ok"]}; }}
+.status-warn {{ color: {theme["warn"]}; }}
+.status-err  {{ color: {theme["err"]}; }}
 """
-
-
-def build_inject_block() -> str:
-    """Return the <style>...</style> string to inject into a Streamlit page."""
-    return f"<style>{GLOBAL_CSS}</style>"
 
 
 def inject_global() -> None:
     """Inject the reading-friendly CSS once per Streamlit page render.
 
-    Idempotent — Streamlit re-renders on every interaction; running this every
-    time is fine because the resulting <style> block is just appended to the DOM
-    and overwrites any prior version cleanly.
+    Reads the active theme from `app_settings` via the database in
+    `st.session_state.db` if available, otherwise falls back to the default
+    theme.
     """
-    st.markdown(build_inject_block(), unsafe_allow_html=True)
+    from casepulse.ui.themes import get_active_theme, THEMES, DEFAULT_THEME
+
+    db = st.session_state.get("db")
+    theme = get_active_theme(db) if db is not None else THEMES[DEFAULT_THEME]
+    st.markdown(f"<style>{_build_css(theme)}</style>", unsafe_allow_html=True)
+
+
+def build_inject_block() -> str:
+    """Legacy helper — returns the <style>...</style> string for the active theme."""
+    from casepulse.ui.themes import get_active_theme, THEMES, DEFAULT_THEME
+
+    db = st.session_state.get("db") if hasattr(st, "session_state") else None
+    theme = get_active_theme(db) if db is not None else THEMES[DEFAULT_THEME]
+    return f"<style>{_build_css(theme)}</style>"
+
+
+def _default_css() -> str:
+    """Return the CSS rendered against the default theme.
+    Module-level convenience used by tests and by callers that want a
+    deterministic snapshot independent of any user setting."""
+    from casepulse.ui.themes import THEMES, DEFAULT_THEME
+    return _build_css(THEMES[DEFAULT_THEME])
+
+
+# Backward-compatible module-level constant — represents the default theme's
+# CSS. Tests and external callers that import GLOBAL_CSS keep working; live
+# rendering goes through `inject_global()` which reads the user's active theme.
+GLOBAL_CSS = _default_css()
