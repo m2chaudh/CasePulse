@@ -141,3 +141,56 @@ def list_filter_chips(db: Database, *, case_id: int) -> list[dict]:
 def delete_filter_chip(db: Database, chip_id: int) -> None:
     with db._get_conn() as conn:
         conn.execute("DELETE FROM binder_filter_chips WHERE id = ?", (chip_id,))
+
+
+# ---------------------------------------------------------------------------
+# Case-relevant senders
+# ---------------------------------------------------------------------------
+
+def upsert_relevant_sender(
+    db: Database, *, case_id: int, address: str, role: str,
+    display_name: str = "", notes: str = "",
+) -> int:
+    with db._get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO case_relevant_senders
+                 (case_id, address, role, display_name, notes, active)
+               VALUES (?, ?, ?, ?, ?, 1)
+               ON CONFLICT(case_id, address) DO UPDATE SET
+                 role = excluded.role,
+                 display_name = excluded.display_name,
+                 notes = excluded.notes,
+                 active = 1""",
+            (case_id, address.lower(), role, display_name, notes),
+        )
+        if cur.lastrowid:
+            return cur.lastrowid
+        row = conn.execute(
+            "SELECT id FROM case_relevant_senders WHERE case_id=? AND address=?",
+            (case_id, address.lower()),
+        ).fetchone()
+        return row["id"]
+
+
+def list_relevant_senders(
+    db: Database, *, case_id: int, active_only: bool = False,
+) -> list[dict]:
+    where = "case_id = ?"
+    args: list = [case_id]
+    if active_only:
+        where += " AND active = 1"
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT id, case_id, address, role, display_name, notes, active
+                FROM case_relevant_senders WHERE {where} ORDER BY role, address""",
+            args,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def deactivate_relevant_sender(db: Database, sender_id: int) -> None:
+    with db._get_conn() as conn:
+        conn.execute(
+            "UPDATE case_relevant_senders SET active = 0 WHERE id = ?",
+            (sender_id,),
+        )

@@ -10,6 +10,8 @@ from casepulse.binder.repository import (
     create_binder_entry, get_binder_entry, list_binder_entries_for_day,
     update_binder_entry, delete_binder_entry,
     create_filter_chip, list_filter_chips, delete_filter_chip,
+    upsert_relevant_sender, list_relevant_senders,
+    deactivate_relevant_sender,
 )
 
 
@@ -84,3 +86,28 @@ def test_filter_chip_roundtrip(tmp_db_with_case):
     assert chips[0]["pinned"] == 1
     delete_filter_chip(db, chip_id)
     assert list_filter_chips(db, case_id=case_id) == []
+
+
+def test_relevant_sender_upsert(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    sid = upsert_relevant_sender(
+        db, case_id=case_id, address="doe@crown.on.ca",
+        role="crown", display_name="A. Doe",
+    )
+    assert sid > 0
+    sid2 = upsert_relevant_sender(
+        db, case_id=case_id, address="doe@crown.on.ca",
+        role="crown", display_name="Andrea Doe",
+    )
+    assert sid == sid2
+    rows = list_relevant_senders(db, case_id=case_id)
+    assert len(rows) == 1
+    assert rows[0]["display_name"] == "Andrea Doe"
+
+
+def test_relevant_sender_deactivate(tmp_db_with_case):
+    db, case_id = tmp_db_with_case
+    sid = upsert_relevant_sender(db, case_id=case_id, address="x@y.com", role="other")
+    deactivate_relevant_sender(db, sid)
+    rows = list_relevant_senders(db, case_id=case_id, active_only=True)
+    assert rows == []
