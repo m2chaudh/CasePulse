@@ -39,17 +39,28 @@ def week_activity_counts(db: Database, *, case_id: int, year: int) -> list[int]:
         for r in rows:
             counts[_iso_week(r["date"])] += 1
         for sql in (
+            # Match the aggregator's rule: items show on this case unless
+            # explicitly tagged to a different case.
             """SELECT substr(e.date_received,1,10) AS d FROM emails e
-               JOIN evidence_tags t ON t.item_type='email' AND t.item_id=e.id
-               WHERE t.case_id=? AND substr(e.date_received,1,4)=?""",
+               WHERE substr(e.date_received,1,4)=?
+                 AND e.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='email' AND case_id != ?
+                 )""",
             """SELECT substr(c.timestamp,1,10) AS d FROM chat_messages c
-               JOIN evidence_tags t ON t.item_type='chat' AND t.item_id=c.id
-               WHERE t.case_id=? AND substr(c.timestamp,1,4)=?""",
+               WHERE substr(c.timestamp,1,4)=?
+                 AND c.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='chat' AND case_id != ?
+                 )""",
             """SELECT substr(d.created_at,1,10) AS d FROM documents d
-               JOIN evidence_tags t ON t.item_type='document' AND t.item_id=d.id
-               WHERE t.case_id=? AND substr(d.created_at,1,4)=?""",
+               WHERE substr(d.created_at,1,4)=?
+                 AND d.id NOT IN (
+                   SELECT item_id FROM evidence_tags
+                    WHERE item_type='document' AND case_id != ?
+                 )""",
         ):
-            rows = conn.execute(sql, (case_id, str(year))).fetchall()
+            rows = conn.execute(sql, (str(year), case_id)).fetchall()
             for r in rows:
                 if r["d"]:
                     counts[_iso_week(r["d"])] += 1
@@ -71,22 +82,36 @@ def year_stats(db: Database, *, case_id: int, year: int) -> dict:
         for label, sql in (
             ("emails",
              """SELECT COUNT(*) n FROM emails e
-                JOIN evidence_tags t ON t.item_type='email' AND t.item_id=e.id
-                WHERE t.case_id=? AND substr(e.date_received,1,4)=?"""),
+                WHERE substr(e.date_received,1,4)=?
+                  AND e.id NOT IN (
+                    SELECT item_id FROM evidence_tags
+                     WHERE item_type='email' AND case_id != ?
+                  )"""),
             ("chats",
              """SELECT COUNT(*) n FROM chat_messages c
-                JOIN evidence_tags t ON t.item_type='chat' AND t.item_id=c.id
-                WHERE t.case_id=? AND substr(c.timestamp,1,4)=?"""),
+                WHERE substr(c.timestamp,1,4)=?
+                  AND c.id NOT IN (
+                    SELECT item_id FROM evidence_tags
+                     WHERE item_type='chat' AND case_id != ?
+                  )"""),
             ("documents",
              """SELECT COUNT(*) n FROM documents d
-                JOIN evidence_tags t ON t.item_type='document' AND t.item_id=d.id
-                WHERE t.case_id=? AND substr(d.created_at,1,4)=?"""),
+                WHERE substr(d.created_at,1,4)=?
+                  AND d.id NOT IN (
+                    SELECT item_id FROM evidence_tags
+                     WHERE item_type='document' AND case_id != ?
+                  )"""),
             ("photos",
              """SELECT COUNT(*) n FROM photo_metadata p
-                JOIN evidence_tags t ON t.item_type=p.source_table AND t.item_id=p.source_row_id
-                WHERE t.case_id=? AND substr(p.taken_at,1,4)=?"""),
+                WHERE substr(p.taken_at,1,4)=?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM evidence_tags t
+                     WHERE t.item_type = p.source_table
+                       AND t.item_id = p.source_row_id
+                       AND t.case_id != ?
+                  )"""),
         ):
-            row = conn.execute(sql, (case_id, str(year))).fetchone()
+            row = conn.execute(sql, (str(year), case_id)).fetchone()
             out[label] = row["n"]
     return out
 
