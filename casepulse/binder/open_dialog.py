@@ -23,9 +23,17 @@ _PDF_INLINE_LIMIT = 12 * 1024 * 1024  # 12 MB
 
 
 def _render_pdf_inline(file_path: str, height: int = 720) -> bool:
-    """Render the PDF via a base64 iframe so the browser's built-in
-    viewer handles layout/fonts/images correctly. Returns True on
-    success, False if the file is too large or unreadable."""
+    """Render the PDF using a Blob URL inside a Streamlit components iframe.
+
+    Why not `data:application/pdf;base64,...` in a markdown <iframe>?
+    Chromium silently fails to render data: URLs in <iframe src=> above
+    ~1.5–2 MB (observed: Wendy Tapp-Moore PDFs at 3 MB rendered as a
+    blank white box). Blob URLs have no such limit. We pass the base64
+    payload to a tiny inline script that decodes → Blob → object URL →
+    iframe.src — all inside Streamlit's components.html sandbox.
+    Returns True on success, False if the file is too large or unreadable."""
+    import streamlit.components.v1 as components
+
     p = Path(file_path)
     if not p.exists() or not p.is_file():
         return False
@@ -42,13 +50,25 @@ def _render_pdf_inline(file_path: str, height: int = 720) -> bool:
     except OSError:
         return False
     b64 = base64.b64encode(data).decode("ascii")
-    iframe = (
-        f'<iframe src="data:application/pdf;base64,{b64}" '
-        f'width="100%" height="{height}" type="application/pdf" '
-        f'style="border:1px solid var(--cp-rule);border-radius:6px;'
-        f'background:white"></iframe>'
-    )
-    st.markdown(iframe, unsafe_allow_html=True)
+    html = f"""
+<div id="pdfwrap" style="height:{height}px;border:1px solid #cbd5e1;
+     border-radius:6px;background:white;overflow:hidden">
+  <iframe id="pdfframe" style="width:100%;height:100%;border:0"
+          type="application/pdf"></iframe>
+</div>
+<script>
+(function() {{
+  const b64 = "{b64}";
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], {{type: "application/pdf"}});
+  const url = URL.createObjectURL(blob);
+  document.getElementById("pdfframe").src = url;
+}})();
+</script>
+"""
+    components.html(html, height=height + 12)
     return True
 
 
@@ -78,6 +98,66 @@ def _is_pdf(content_type: str, filename: str) -> bool:
     if content_type and "pdf" in content_type.lower():
         return True
     return bool(filename) and filename.lower().endswith(".pdf")
+
+
+def _render_file_preview(
+    *, file_path: str, filename: str, content_type: str,
+    extracted_text: str = "", download_key: str = "",
+) -> None:
+    """Type-aware inline preview for a file on disk: PDFs render via
+    browser viewer, images via st.image, anything with extracted_text
+    falls back to a scrolling text block. Always shows a Download
+    button when the file is readable."""
+    if not file_path:
+        st.caption("No file path on record.")
+        return
+    p = Path(file_path)
+    if not p.exists() or not p.is_file():
+        st.caption("File not on disk (deleted or moved). Metadata only.")
+        return
+
+    try:
+        with p.open("rb") as f:
+            data = f.read()
+        st.download_button(
+            "Download",
+            data=data,
+            file_name=filename or p.name,
+            mime=content_type or "application/octet-stream",
+            key=download_key or f"dl_{p.name}",
+        )
+    except OSError:
+        st.caption("(file unreadable)")
+        return
+
+    if _is_image(content_type, filename):
+        try:
+            st.image(file_path, use_container_width=True)
+        except Exception as e:
+            st.caption(f"(image preview failed: {e})")
+    elif _is_pdf(content_type, filename):
+        rendered = _render_pdf_inline(file_path)
+        if extracted_text:
+            label = "Extracted text" if rendered else "Extracted text (PDF preview unavailable)"
+            with st.expander(label, expanded=not rendered):
+                st.markdown(
+                    f"<div class='reading-content'><pre>"
+                    f"{escape(extracted_text[:8000])}"
+                    f"{'…' if len(extracted_text) > 8000 else ''}"
+                    f"</pre></div>",
+                    unsafe_allow_html=True,
+                )
+        elif not rendered:
+            st.caption("No extracted text available. Use Download to open it locally.")
+    elif extracted_text:
+        with st.container(border=True):
+            st.markdown(
+                f"<div class='reading-content'><pre>"
+                f"{escape(extracted_text[:8000])}"
+                f"{'…' if len(extracted_text) > 8000 else ''}"
+                f"</pre></div>",
+                unsafe_allow_html=True,
+            )
 
 
 def _fetch_attachments(db, email_id: int) -> list[dict]:
@@ -378,7 +458,8 @@ def _fetch_chat(db, source_id: int):
 def _fetch_document(db, source_id: int):
     with db._get_conn() as conn:
         return conn.execute(
-            """SELECT id, filename, file_path, content_hash, created_at
+            """SELECT id, filename, file_path, content_type, size_bytes,
+                      extracted_text, content_hash, created_at
                FROM documents WHERE id = ?""",
             (source_id,),
         ).fetchone()
@@ -388,7 +469,7 @@ def _fetch_attachment(db, source_id: int):
     with db._get_conn() as conn:
         return conn.execute(
             """SELECT id, email_id, filename, content_type, size_bytes,
-                      file_path, created_at, is_duplicate
+                      file_path, extracted_text, created_at, is_duplicate
                FROM attachments WHERE id = ?""",
             (source_id,),
         ).fetchone()
@@ -651,15 +732,23 @@ def open_item_dialog(db, *, source: str, source_id: int):
             st.error(f"Document #{source_id} not found")
             return
         st.markdown(f"### {row['filename']}")
-        st.caption(f"Created: {row['created_at']}")
+        meta_bits = [f"Created: {row['created_at']}"]
+        if row["content_type"]:
+            meta_bits.append(row["content_type"])
+        if row["size_bytes"]:
+            meta_bits.append(_human_size(row["size_bytes"]))
+        st.caption(" · ".join(meta_bits))
         if row["file_path"]:
             st.code(row["file_path"], language=None)
-            st.caption(
-                "📂 To open this file in Finder, copy the path above. "
-                "An in-app PDF viewer arrives in a later phase."
-            )
         if row["content_hash"]:
             st.caption(f"Hash: `{row['content_hash']}`")
+        _render_file_preview(
+            file_path=row["file_path"] or "",
+            filename=row["filename"] or "",
+            content_type=row["content_type"] or "",
+            extracted_text=row["extracted_text"] or "",
+            download_key=f"doc_dl_{row['id']}",
+        )
 
     elif source == "attachment":
         row = _fetch_attachment(db, source_id)
@@ -669,11 +758,18 @@ def open_item_dialog(db, *, source: str, source_id: int):
         st.markdown(f"### {row['filename']}")
         if row["email_id"]:
             st.caption(f"From email #{row['email_id']}")
-        st.caption(f"{row['content_type'] or '?'} · {row['size_bytes'] or 0} bytes")
+        st.caption(f"{row['content_type'] or '?'} · {_human_size(row['size_bytes'])}")
         if row["file_path"]:
             st.code(row["file_path"], language=None)
         if row["is_duplicate"]:
             st.warning("This is flagged as a duplicate.")
+        _render_file_preview(
+            file_path=row["file_path"] or "",
+            filename=row["filename"] or "",
+            content_type=row["content_type"] or "",
+            extracted_text=row["extracted_text"] or "",
+            download_key=f"att_dl_{row['id']}",
+        )
 
     elif source == "photo":
         row = _fetch_photo(db, source_id)
