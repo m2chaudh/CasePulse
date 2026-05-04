@@ -304,10 +304,69 @@ else:
             )
         else:
             st.success(
-                "All preview rows ✓. Parser is ready for the next step "
-                "(image extraction + chat_messages rewrite migration). "
-                "That migration will land in a separate session."
+                "All preview rows ✓. Parser approved — the v2 apply "
+                "migration below will rewrite `chat_messages` from this "
+                "parser's output."
             )
+
+            # ── v2 apply migration ────────────────────────────────────
+            from casepulse.scripts.apply_appclose_v2 import apply_v2
+
+            st.markdown("#### Apply v2 migration")
+            st.caption(
+                "Replaces all current AppClose `chat_messages` rows for "
+                "this PDF with the v2 parser output. Senders are "
+                "normalised, missed messages from header bleed are "
+                "captured, and boilerplate is gone. Row IDs are not "
+                "preserved (any existing case-binder tags on AppClose "
+                "rows by id will need re-attaching). Idempotent — "
+                "running twice produces the same final state."
+            )
+
+            dry = apply_v2(db, _pdf_path, apply_changes=False, parsed=parsed)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Old rows", dry["old_rows"])
+            col2.metric("New rows", dry["new_rows"])
+            col3.metric("Δ", dry["new_rows"] - dry["old_rows"])
+
+            with st.expander("Sender / action breakdown", expanded=False):
+                st.markdown("**Senders (after v2 normalisation):**")
+                for s, n in sorted(
+                    dry["senders"].items(), key=lambda kv: -kv[1]
+                ):
+                    st.text(f"  {n:5d}  {s}")
+                st.markdown("**Actions:**")
+                for a, n in sorted(
+                    dry["actions"].items(), key=lambda kv: -kv[1]
+                ):
+                    st.text(f"  {n:5d}  {a}")
+                st.markdown(
+                    f"**Date range:** `{dry['date_start']}` → "
+                    f"`{dry['date_end']}`"
+                )
+
+            if not dry["would_change"]:
+                st.info(
+                    "Already in sync with v2 output — no changes needed."
+                )
+            else:
+                if st.button(
+                    "Apply v2 migration", type="primary",
+                    key="apply_appclose_v2",
+                ):
+                    if backup_first:
+                        path = _backup_db()
+                        if path:
+                            st.info(f"Backup written to `{path}`")
+                    stats = apply_v2(
+                        db, _pdf_path, apply_changes=True, parsed=parsed,
+                    )
+                    st.success(
+                        f"Done. {stats['old_rows']} old rows replaced "
+                        f"with {stats['new_rows']} v2 rows. "
+                        f"`chat_imports` updated."
+                    )
+                    st.rerun()
 st.divider()
 st.caption(
     "These migrations only modify `chat_messages`. Future imports won't "
