@@ -86,7 +86,7 @@ def render_day_drawer(db, *, case_id: int, day: date, chip_filter=None) -> None:
                     and (items[j].metadata.get("platform", ""),
                          items[j].metadata.get("chat_name", "")) == key):
                 j += 1
-            _render_chat_cluster(items[i:j])
+            _render_chat_cluster(items[i:j], db)
             i = j
             continue
 
@@ -138,7 +138,7 @@ def _sender_colour(sender: str, palette: dict[str, str]) -> str:
     return palette[sender]
 
 
-def _render_chat_cluster(cluster: list[AggregatedItem]) -> None:
+def _render_chat_cluster(cluster: list[AggregatedItem], db) -> None:
     """Render a run of chats from the same conversation as a WhatsApp/
     AppClose-style bubble cluster — one bubble per message, sender-coloured
     name, time inline. Replaces N pop-out rows with one continuous view."""
@@ -146,11 +146,28 @@ def _render_chat_cluster(cluster: list[AggregatedItem]) -> None:
     platform = first.metadata.get("platform", "chat")
     chat_name = first.metadata.get("chat_name", "")
 
+    # Look up ChatVault deep-link anchors for the cluster's chat_message ids
+    from casepulse.chatvault_integration import (
+        get_anchors_for_messages, url_for,
+    )
+    _msg_ids = [it.source_id for it in cluster if it.source == "chat"]
+    _anchors = get_anchors_for_messages(db, _msg_ids) if _msg_ids else {}
+    _first_anchor = next(
+        (_anchors[m] for m in _msg_ids if m in _anchors), None
+    )
+
     # Header for the cluster
     header = f"💬 {platform}"
     if chat_name:
         header += f" / {chat_name}"
     header += f"  ·  {len(cluster)} message(s)"
+    if _first_anchor:
+        cv_url = url_for(_first_anchor["export_name"], _first_anchor["anchor_id"])
+        header += (
+            f"  ·  <a href='{cv_url}' target='_blank' "
+            f"style='color:#268bd2; text-decoration:none'>"
+            f"View in ChatVault →</a>"
+        )
 
     # WhatsApp-style for whatsapp, white-background AppClose-style otherwise
     is_whatsapp = "whatsapp" in platform.lower()
@@ -195,6 +212,17 @@ def _render_chat_cluster(cluster: list[AggregatedItem]) -> None:
                 f"margin-top:4px'>📎 {mt}</div>"
             )
 
+        # Per-bubble ChatVault deep-link arrow, when this msg has an anchor
+        anchor_link = ""
+        if it.source == "chat" and it.source_id in _anchors:
+            a = _anchors[it.source_id]
+            anchor_url = url_for(a["export_name"], a["anchor_id"])
+            anchor_link = (
+                f" <a href='{anchor_url}' target='_blank' "
+                f"style='color:#268bd2; text-decoration:none' "
+                f"title='Open in ChatVault'>↗</a>"
+            )
+
         parts.append(
             f"<div style='display:flex; justify-content:{align}; margin: 3px 0;'>"
             f"<div style='max-width:75%; padding:6px 10px 4px; "
@@ -205,7 +233,7 @@ def _render_chat_cluster(cluster: list[AggregatedItem]) -> None:
             f"line-height:1.4; color:#111827'>{body}</div>"
             f"{media_hint}"
             f"<div style='font-size:11px; color:#667781; text-align:right; "
-            f"margin-top:2px'>{time_label}</div>"
+            f"margin-top:2px'>{time_label}{anchor_link}</div>"
             f"</div>"
             f"</div>"
         )

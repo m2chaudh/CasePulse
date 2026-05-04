@@ -98,3 +98,140 @@ else:
             st.rerun()
     with col2:
         st.caption("You can change these settings anytime from the Setup page.")
+
+
+# ── ChatVault Exports ─────────────────────────────────────────────────────
+st.divider()
+st.markdown("## ChatVault Exports")
+st.caption(
+    "Register a folder produced by ChatVault (`chatvault appclose <pdf>` "
+    "or the WhatsApp pipeline). CasePulse symlinks it under `static/` "
+    "so Streamlit serves it, then indexes the `msg-N` anchors against "
+    "your `chat_messages` rows. The day-drawer chat clusters get "
+    "**View in ChatVault →** buttons that jump to the right message."
+)
+
+from casepulse.chatvault_integration import (
+    get_scan_parent, set_scan_parent, scan_for_exports,
+    list_exports, register_export, remove_export, url_for,
+)
+from casepulse.scripts.index_chatvault_export import index_export
+
+_cv_db = _db
+
+# Parent folder
+_current_parent = get_scan_parent(_cv_db)
+new_parent = st.text_input(
+    "Parent folder to scan for exports",
+    value=_current_parent,
+    placeholder="/Users/you/Documents/ChatVault-output/",
+    key="cv_scan_parent",
+    help="A folder containing one subfolder per ChatVault export. Each "
+         "subfolder must contain an `index.html`.",
+)
+col_save, col_refresh = st.columns([1, 4])
+with col_save:
+    if st.button("Save parent", key="cv_save_parent"):
+        set_scan_parent(_cv_db, new_parent)
+        st.rerun()
+
+# Existing exports
+_exports = list_exports(_cv_db)
+if _exports:
+    st.markdown("### Registered exports")
+    for exp in _exports:
+        with st.container(border=True):
+            cols = st.columns([3, 2, 1, 1, 1])
+            with cols[0]:
+                st.markdown(f"**{exp['name']}**")
+                st.caption(
+                    f"{exp['platform']} · {exp['chat_name'] or '(no chat name)'}"
+                )
+                st.caption(f"`{exp['source_dir']}`")
+            with cols[1]:
+                last = exp["last_indexed_at"] or "never"
+                st.caption(
+                    f"Indexed: **{last}**"
+                    + (f" · {exp['message_count']} msgs"
+                       if exp["message_count"] else "")
+                )
+            with cols[2]:
+                if st.button("Re-index", key=f"cv_reidx_{exp['id']}"):
+                    stats = index_export(_cv_db, exp["id"])
+                    if "error" in stats:
+                        st.error(stats["error"])
+                    else:
+                        st.success(
+                            f"{stats['matched']} matched · "
+                            f"{stats['unmatched_cv']} CV unmatched · "
+                            f"{stats['unmatched_cm']} CM unmatched"
+                        )
+                        st.rerun()
+            with cols[3]:
+                st.markdown(
+                    f"[Open ↗]({url_for(exp['name'])})",
+                    help="Open the export in a new browser tab.",
+                )
+            with cols[4]:
+                if st.button("Remove", key=f"cv_rm_{exp['id']}"):
+                    remove_export(_cv_db, exp["id"])
+                    st.rerun()
+else:
+    st.info("No ChatVault exports registered yet.")
+
+# Scan + register
+if new_parent:
+    _candidates = scan_for_exports(new_parent)
+    _registered_paths = {e["source_dir"] for e in _exports}
+    _unregistered = [
+        c for c in _candidates if c["path"] not in _registered_paths
+    ]
+    if _unregistered:
+        st.markdown("### Available to register")
+        for c in _unregistered:
+            with st.container(border=True):
+                cols = st.columns([3, 2, 1])
+                with cols[0]:
+                    st.markdown(f"**{c['name']}**")
+                    st.caption(
+                        f"{c['platform'] or 'unknown'} · "
+                        f"{c['chat_name'] or '(no chat name)'}"
+                    )
+                    st.caption(f"`{c['path']}`")
+                with cols[1]:
+                    reg_name = st.text_input(
+                        "Register as",
+                        value=(
+                            f"{c['chat_name']} ({c['platform']})"
+                            if c['chat_name'] and c['platform']
+                            else c['name']
+                        ),
+                        key=f"cv_regname_{c['name']}",
+                        label_visibility="collapsed",
+                    )
+                with cols[2]:
+                    if st.button("Register",
+                                  key=f"cv_reg_{c['name']}",
+                                  type="primary"):
+                        try:
+                            new_id = register_export(
+                                _cv_db, reg_name, c["path"],
+                            )
+                            stats = index_export(_cv_db, new_id)
+                            st.success(
+                                f"Registered + indexed: "
+                                f"{stats['matched']} matches"
+                            )
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
+    elif _candidates:
+        st.caption(
+            f"All {len(_candidates)} candidate folder(s) under that "
+            f"parent are already registered."
+        )
+    else:
+        st.caption(
+            "No candidate folders found (need a subfolder containing "
+            "`index.html`)."
+        )

@@ -1,0 +1,2 @@
+# ChatVault export symlinks are runtime state — not version-controlled.
+chatvault/

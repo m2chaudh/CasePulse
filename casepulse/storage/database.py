@@ -275,6 +275,31 @@ CREATE INDEX IF NOT EXISTS idx_evidence_tags_item ON evidence_tags(item_type, it
 CREATE INDEX IF NOT EXISTS idx_evidence_tags_case ON evidence_tags(case_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_item ON annotations(item_type, item_id);
 
+CREATE TABLE IF NOT EXISTS chatvault_exports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    source_dir TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    chat_name TEXT DEFAULT '',
+    registered_at TEXT DEFAULT (datetime('now')),
+    last_indexed_at TEXT,
+    message_count INTEGER DEFAULT 0,
+    notes TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS chatvault_anchors (
+    chat_message_id INTEGER NOT NULL,
+    export_id INTEGER NOT NULL,
+    anchor_id TEXT NOT NULL,
+    PRIMARY KEY (chat_message_id, export_id),
+    FOREIGN KEY (chat_message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (export_id) REFERENCES chatvault_exports(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chatvault_anchors_export
+    ON chatvault_anchors(export_id);
+CREATE INDEX IF NOT EXISTS idx_chatvault_anchors_msg
+    ON chatvault_anchors(chat_message_id);
+
 CREATE TABLE IF NOT EXISTS themes (
   id INTEGER PRIMARY KEY,
   case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,

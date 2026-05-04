@@ -12,6 +12,9 @@ font = "sans serif"
 
 [server]
 headless = true
+# Serve files under <project_root>/static/ at /app/static/<path>. Used
+# by the ChatVault HTML integration to expose registered exports.
+enableStaticServing = true
 
 [browser]
 gatherUsageStats = false
