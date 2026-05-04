@@ -113,7 +113,7 @@ st.caption(
 
 from casepulse.chatvault_integration import (
     get_scan_parent, set_scan_parent, scan_for_exports,
-    list_exports, register_export, remove_export, url_for,
+    list_exports, register_export, remove_export, relink_export, url_for,
 )
 from casepulse.scripts.index_chatvault_export import index_export
 
@@ -140,10 +140,25 @@ _exports = list_exports(_cv_db)
 if _exports:
     st.markdown("### Registered exports")
     for exp in _exports:
+        _h = exp["health"]
+        _broken = _h["status"] != "ok"
+        # Red top border + warning when broken so it's impossible to miss
+        if _broken:
+            st.markdown(
+                f"<div style='height:4px; background:#dc2626; "
+                f"border-radius:4px 4px 0 0; margin-top:8px'></div>",
+                unsafe_allow_html=True,
+            )
         with st.container(border=True):
+            if _broken:
+                st.error(
+                    f"⚠ **Broken — {_h['status'].replace('-', ' ')}**: "
+                    f"{_h['message']}"
+                )
             cols = st.columns([3, 2, 1, 1, 1])
             with cols[0]:
-                st.markdown(f"**{exp['name']}**")
+                badge = "🟢" if not _broken else "🔴"
+                st.markdown(f"{badge} **{exp['name']}**")
                 st.caption(
                     f"{exp['platform']} · {exp['chat_name'] or '(no chat name)'}"
                 )
@@ -156,7 +171,12 @@ if _exports:
                        if exp["message_count"] else "")
                 )
             with cols[2]:
-                if st.button("Re-index", key=f"cv_reidx_{exp['id']}"):
+                if st.button(
+                    "Re-index", key=f"cv_reidx_{exp['id']}",
+                    disabled=_broken,
+                    help=("Source must be reachable. Use Re-link if it "
+                          "moved.") if _broken else None,
+                ):
                     stats = index_export(_cv_db, exp["id"])
                     if "error" in stats:
                         st.error(stats["error"])
@@ -168,14 +188,41 @@ if _exports:
                         )
                         st.rerun()
             with cols[3]:
-                st.markdown(
-                    f"[Open ↗]({url_for(exp['name'])})",
-                    help="Open the export in a new browser tab.",
-                )
+                if _broken:
+                    st.caption("Open ↗ disabled")
+                else:
+                    st.markdown(
+                        f"[Open ↗]({url_for(exp['name'])})",
+                        help="Open the export in a new browser tab.",
+                    )
             with cols[4]:
                 if st.button("Remove", key=f"cv_rm_{exp['id']}"):
                     remove_export(_cv_db, exp["id"])
                     st.rerun()
+
+            # Re-link affordance — only shown when broken, expanded by
+            # default so the next click finishes the repair.
+            if _broken:
+                with st.expander("Re-link this export to a new path",
+                                  expanded=True):
+                    new_path = st.text_input(
+                        "New source folder",
+                        value=exp["source_dir"],
+                        key=f"cv_relink_path_{exp['id']}",
+                        help="Folder containing the new index.html + media/.",
+                    )
+                    if st.button("Re-link",
+                                  key=f"cv_relink_btn_{exp['id']}",
+                                  type="primary"):
+                        try:
+                            relink_export(_cv_db, exp["id"], new_path)
+                            st.success(
+                                "Re-linked. Click Re-index to refresh "
+                                "anchors against the new source."
+                            )
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
 else:
     st.info("No ChatVault exports registered yet.")
 

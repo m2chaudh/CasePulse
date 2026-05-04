@@ -11,9 +11,10 @@ from textwrap import dedent
 import pytest
 
 from casepulse.chatvault_integration import (
-    detect_chat_name, detect_platform, get_anchors_for_messages,
-    list_exports, register_export, remove_export, scan_for_exports,
-    static_root, symlink_path_for, url_for,
+    detect_chat_name, detect_platform, export_health,
+    get_anchors_for_messages, list_exports, register_export,
+    relink_export, remove_export, scan_for_exports, static_root,
+    symlink_path_for, url_for,
 )
 from casepulse.scripts.index_chatvault_export import (
     _combine_minute, _norm_body, _to_minute, index_export,
@@ -351,6 +352,78 @@ def test_get_anchors_handles_empty_list(tmp_db):
 
 
 # ── Foreign-key CASCADE on chat_messages delete ───────────────────────────
+
+# ── Health / Re-link ──────────────────────────────────────────────────────
+
+def test_export_health_ok_when_source_intact(tmp_db, tmp_export, isolated_static):
+    register_export(tmp_db, "M", str(tmp_export))
+    exp = list_exports(tmp_db)[0]
+    assert exp["health"]["status"] == "ok"
+
+
+def test_export_health_missing_source(tmp_db, tmp_export, isolated_static):
+    register_export(tmp_db, "M", str(tmp_export))
+    # Simulate the user moving / deleting the source folder
+    import shutil
+    shutil.rmtree(tmp_export)
+    exp = list_exports(tmp_db)[0]
+    assert exp["health"]["status"] == "missing-source"
+    assert "gone" in exp["health"]["message"].lower()
+
+
+def test_export_health_missing_index(tmp_db, tmp_export, isolated_static):
+    register_export(tmp_db, "M", str(tmp_export))
+    (tmp_export / "index.html").unlink()
+    exp = list_exports(tmp_db)[0]
+    assert exp["health"]["status"] == "missing-index"
+
+
+def test_relink_export_repairs_broken_state(
+    tmp_db, tmp_export, tmp_path, isolated_static,
+):
+    register_export(tmp_db, "M", str(tmp_export))
+    import shutil
+    shutil.rmtree(tmp_export)
+    # New target
+    new_dir = tmp_path / "Manisha-restored"
+    _write_fixture(new_dir, platform="whatsapp", chat_name="Manisha", messages=[
+        {"id": 0, "sender": "Manisha", "date": "August 19, 2024",
+         "time": "6:50 PM", "body": "still here"},
+    ])
+    relink_export(tmp_db, list_exports(tmp_db)[0]["id"], str(new_dir))
+    exp = list_exports(tmp_db)[0]
+    assert exp["health"]["status"] == "ok"
+    assert exp["source_dir"] == str(new_dir.resolve())
+
+
+def test_get_anchors_marks_broken(
+    tmp_db, tmp_export, isolated_static,
+):
+    """When the export's source disappears, the anchor lookup still
+    returns the row but flags it as broken so the UI can grey it out."""
+    with tmp_db._get_conn() as conn:
+        conn.execute(
+            "INSERT INTO chat_messages (source_type, platform, sender, "
+            "timestamp, message_text) VALUES "
+            "('whatsapp', 'WhatsApp', 'Manisha', '2024-08-19T18:50:00', "
+            "'Can I see the kids please')"
+        )
+        cm_id = conn.execute(
+            "SELECT id FROM chat_messages ORDER BY id DESC LIMIT 1"
+        ).fetchone()["id"]
+    export_id = register_export(tmp_db, "M", str(tmp_export))
+    from casepulse.scripts.index_chatvault_export import index_export
+    index_export(tmp_db, export_id)
+
+    # Healthy first
+    assert get_anchors_for_messages(tmp_db, [cm_id])[cm_id]["broken"] is False
+
+    # Break it
+    import shutil
+    shutil.rmtree(tmp_export)
+    out = get_anchors_for_messages(tmp_db, [cm_id])
+    assert out[cm_id]["broken"] is True
+
 
 def test_chat_message_delete_cascades_anchor(
     tmp_db, tmp_export, isolated_static,

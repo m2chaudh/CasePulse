@@ -171,15 +171,83 @@ def remove_export(db: Database, export_id: int) -> None:
                     pass
 
 
+def export_health(export: dict) -> dict:
+    """Filesystem-state check for a registered export. Returns a dict
+    with `status` and a human-readable `message`. Does no DB writes.
+
+    status values:
+      - 'ok'            : source_dir exists, has index.html, symlink works
+      - 'missing-source': source_dir does not exist on disk
+      - 'missing-index' : source_dir exists but no index.html in it
+      - 'broken-symlink': symlink under static/chatvault/ is gone or points
+                          somewhere unexpected (registration was wiped or
+                          static_root() is on a different volume now)
+    """
+    src = Path(export["source_dir"])
+    if not src.exists():
+        return {"status": "missing-source",
+                "message": f"Source folder is gone: {src}"}
+    if not src.is_dir():
+        return {"status": "missing-source",
+                "message": f"Source path is not a directory: {src}"}
+    if not (src / "index.html").exists():
+        return {"status": "missing-index",
+                "message": f"index.html no longer in {src}"}
+
+    link = symlink_path_for(export["name"])
+    if not link.is_symlink() and not link.exists():
+        return {"status": "broken-symlink",
+                "message": (f"Static symlink missing at {link}. "
+                            f"Use Re-link to recreate it.")}
+    # If the symlink points somewhere different than the recorded source_dir,
+    # treat that as broken so the user re-links explicitly.
+    try:
+        if link.is_symlink() and link.resolve() != src.resolve():
+            return {"status": "broken-symlink",
+                    "message": (f"Symlink target diverged: points to "
+                                f"{link.resolve()} but registry says {src}.")}
+    except OSError:
+        return {"status": "broken-symlink",
+                "message": f"Cannot resolve symlink at {link}."}
+    return {"status": "ok", "message": ""}
+
+
+def relink_export(db: Database, export_id: int, new_source_dir: str) -> None:
+    """Repair an export by pointing it at a new source folder. Updates the
+    DB row and refreshes the static symlink. Anchors are kept (you should
+    re-index right after — content fingerprint may have shifted)."""
+    src = Path(new_source_dir).expanduser().resolve()
+    if not src.is_dir():
+        raise ValueError(f"Source dir does not exist: {new_source_dir}")
+    if not (src / "index.html").exists():
+        raise ValueError(f"No index.html in source dir: {new_source_dir}")
+    with db._get_conn() as conn:
+        row = conn.execute(
+            "SELECT name FROM chatvault_exports WHERE id = ?",
+            (export_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"export {export_id} not found")
+        _create_or_refresh_symlink(row["name"], str(src))
+        conn.execute(
+            "UPDATE chatvault_exports SET source_dir = ? WHERE id = ?",
+            (str(src), export_id),
+        )
+
+
 def list_exports(db: Database) -> list[dict]:
-    """All registered exports, newest first."""
+    """All registered exports, newest first. Each row includes a
+    `health` dict from export_health()."""
     with db._get_conn() as conn:
         rows = conn.execute(
             "SELECT id, name, source_dir, platform, chat_name, "
             "registered_at, last_indexed_at, message_count, notes "
             "FROM chatvault_exports ORDER BY id DESC"
         ).fetchall()
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    for e in out:
+        e["health"] = export_health(e)
+    return out
 
 
 def get_export(db: Database, export_id: int) -> Optional[dict]:
@@ -205,9 +273,11 @@ def get_anchors_for_messages(
 ) -> dict[int, dict]:
     """Bulk lookup: chat_messages.id → most-recent matching anchor info.
 
-    Returns {chat_message_id: {anchor_id, export_id, export_name, platform}}.
-    If a message has anchors in multiple exports, the most recent export
-    (highest export_id) wins.
+    Returns {chat_message_id: {anchor_id, export_id, export_name,
+    platform, broken}}. If a message has anchors in multiple exports,
+    the most recent export (highest export_id) wins. The `broken` flag
+    is True when the export's source/symlink is not reachable — caller
+    should skip or grey-out the deep link in that case.
     """
     if not message_ids:
         return {}
@@ -215,7 +285,7 @@ def get_anchors_for_messages(
     with db._get_conn() as conn:
         rows = conn.execute(
             f"""SELECT a.chat_message_id, a.anchor_id, a.export_id,
-                       e.name AS export_name, e.platform
+                       e.name AS export_name, e.platform, e.source_dir
                 FROM chatvault_anchors a
                 JOIN chatvault_exports e ON e.id = a.export_id
                 WHERE a.chat_message_id IN ({placeholders})
@@ -223,15 +293,23 @@ def get_anchors_for_messages(
             message_ids,
         ).fetchall()
     out: dict[int, dict] = {}
+    health_cache: dict[int, bool] = {}  # export_id → broken?
     for r in rows:
-        # First row per chat_message_id wins (descending export_id)
-        if r["chat_message_id"] not in out:
-            out[r["chat_message_id"]] = {
-                "anchor_id": r["anchor_id"],
-                "export_id": r["export_id"],
-                "export_name": r["export_name"],
-                "platform": r["platform"],
-            }
+        if r["chat_message_id"] in out:
+            continue  # Highest export_id wins; first row per id is it
+        eid = r["export_id"]
+        if eid not in health_cache:
+            h = export_health({
+                "name": r["export_name"], "source_dir": r["source_dir"],
+            })
+            health_cache[eid] = (h["status"] != "ok")
+        out[r["chat_message_id"]] = {
+            "anchor_id": r["anchor_id"],
+            "export_id": eid,
+            "export_name": r["export_name"],
+            "platform": r["platform"],
+            "broken": health_cache[eid],
+        }
     return out
 
 

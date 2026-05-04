@@ -162,12 +162,22 @@ def _render_chat_cluster(cluster: list[AggregatedItem], db) -> None:
         header += f" / {chat_name}"
     header += f"  ·  {len(cluster)} message(s)"
     if _first_anchor:
-        cv_url = url_for(_first_anchor["export_name"], _first_anchor["anchor_id"])
-        header += (
-            f"  ·  <a href='{cv_url}' target='_blank' "
-            f"style='color:#268bd2; text-decoration:none'>"
-            f"View in ChatVault →</a>"
-        )
+        if _first_anchor.get("broken"):
+            header += (
+                "  ·  <span style='color:#dc2626' "
+                "title='ChatVault source folder is unreachable. "
+                "Repair on Setup → ChatVault Exports.'>"
+                "⚠ ChatVault unreachable</span>"
+            )
+        else:
+            cv_url = url_for(
+                _first_anchor["export_name"], _first_anchor["anchor_id"]
+            )
+            header += (
+                f"  ·  <a href='{cv_url}' target='_blank' "
+                f"style='color:#268bd2; text-decoration:none'>"
+                f"View in ChatVault →</a>"
+            )
 
     # WhatsApp-style for whatsapp, white-background AppClose-style otherwise
     is_whatsapp = "whatsapp" in platform.lower()
@@ -216,12 +226,18 @@ def _render_chat_cluster(cluster: list[AggregatedItem], db) -> None:
         anchor_link = ""
         if it.source == "chat" and it.source_id in _anchors:
             a = _anchors[it.source_id]
-            anchor_url = url_for(a["export_name"], a["anchor_id"])
-            anchor_link = (
-                f" <a href='{anchor_url}' target='_blank' "
-                f"style='color:#268bd2; text-decoration:none' "
-                f"title='Open in ChatVault'>↗</a>"
-            )
+            if a.get("broken"):
+                anchor_link = (
+                    " <span style='color:#dc2626' "
+                    "title='ChatVault source unreachable'>⚠</span>"
+                )
+            else:
+                anchor_url = url_for(a["export_name"], a["anchor_id"])
+                anchor_link = (
+                    f" <a href='{anchor_url}' target='_blank' "
+                    f"style='color:#268bd2; text-decoration:none' "
+                    f"title='Open in ChatVault'>↗</a>"
+                )
 
         parts.append(
             f"<div style='display:flex; justify-content:{align}; margin: 3px 0;'>"
