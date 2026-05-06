@@ -1,0 +1,20 @@
+[theme]
+# Default base — Streamlit's chrome (slider tracks, scrollbars, native
+# menus) opens with these values. The runtime theme picker overrides
+# everything else via CSS in casepulse.case_theory.ui.reading_styles.
+# Default = Solarized Light.
+base = "light"
+primaryColor = "#268bd2"
+backgroundColor = "#fdf6e3"
+secondaryBackgroundColor = "#eee8d5"
+textColor = "#586e75"
+font = "sans serif"
+
+[server]
+headless = true
+# Serve files under <project_root>/static/ at /app/static/<path>. Used
+# by the ChatVault HTML integration to expose registered exports.
+enableStaticServing = true
+
+[browser]
+gatherUsageStats = false

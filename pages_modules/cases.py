@@ -9,6 +9,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from casepulse.legal.exhibits import (
     LEGAL_ISSUES, FLAGS, generate_exhibit_label, preview_exhibit_labels,
+    get_issues_for_type, get_flags,
+    get_custom_issues, get_custom_flags,
+    add_custom_issue, remove_custom_issue,
+    add_custom_flag, remove_custom_flag,
 )
 
 st.set_page_config(page_title="CasePulse - Cases", page_icon="CP", layout="wide")
@@ -107,6 +111,66 @@ tab_evidence, tab_annotate, tab_collections, tab_settings = st.tabs([
     "Tag Evidence", "Annotations", "Collections", "Case Settings"
 ])
 
+# ── Manage custom Issues + Flags (works on the active case_type) ──
+with st.expander("Manage Issues + Flags (custom)", expanded=False):
+    st.caption(
+        "Add your own issue/flag codes here. Built-in ones can't be removed; "
+        "custom ones are scoped per case-type for issues and globally for flags."
+    )
+    mi_col, mf_col = st.columns(2)
+
+    with mi_col:
+        st.markdown(f"**Issues — {active_case['case_type'].title()}**")
+        ci_existing = get_custom_issues(db, active_case["case_type"])
+        if ci_existing:
+            for code, label in ci_existing:
+                row = st.columns([5, 1])
+                row[0].markdown(f"- `{code}` — {label}")
+                if row[1].button("✕", key=f"del_issue_{code}"):
+                    remove_custom_issue(db, active_case["case_type"], code)
+                    st.rerun()
+        else:
+            st.caption("_No custom issues yet._")
+
+        with st.form("add_custom_issue_form", clear_on_submit=True):
+            ic = st.columns([1, 2])
+            new_code = ic[0].text_input("Code (e.g. own_counsel)", key="new_issue_code")
+            new_label = ic[1].text_input("Label", key="new_issue_label",
+                                          placeholder="e.g. Own Counsel Correspondence")
+            if st.form_submit_button("Add issue"):
+                try:
+                    add_custom_issue(db, active_case["case_type"], new_code, new_label)
+                    st.success(f"Added '{new_label}'")
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+
+    with mf_col:
+        st.markdown("**Flags (global)**")
+        cf_existing = get_custom_flags(db)
+        if cf_existing:
+            for code, label in cf_existing:
+                row = st.columns([5, 1])
+                row[0].markdown(f"- `{code}` — {label}")
+                if row[1].button("✕", key=f"del_flag_{code}"):
+                    remove_custom_flag(db, code)
+                    st.rerun()
+        else:
+            st.caption("_No custom flags yet._")
+
+        with st.form("add_custom_flag_form", clear_on_submit=True):
+            fc = st.columns([1, 2])
+            f_code = fc[0].text_input("Code", key="new_flag_code")
+            f_label = fc[1].text_input("Label", key="new_flag_label",
+                                        placeholder="e.g. Sworn before notary")
+            if st.form_submit_button("Add flag"):
+                try:
+                    add_custom_flag(db, f_code, f_label)
+                    st.success(f"Added '{f_label}'")
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+
 # ── Tab 1: Tag Evidence ──
 with tab_evidence:
     st.markdown("### Tag Evidence Items")
@@ -117,7 +181,8 @@ with tab_evidence:
         source_type = st.selectbox("Source", ["Emails", "Chat Messages", "Documents", "Attachments"], key="ev_source")
     with col2:
         # Get legal issues for this case type
-        issues_for_type = LEGAL_ISSUES.get(active_case["case_type"], [])
+        issues_for_type = get_issues_for_type(db, active_case["case_type"])
+        flags_all = get_flags(db)
         issue_filter = st.selectbox(
             "Filter by Issue",
             ["All"] + [label for _, label in issues_for_type],
@@ -126,7 +191,7 @@ with tab_evidence:
     with col3:
         flag_filter = st.selectbox(
             "Filter by Flag",
-            ["All"] + [label for _, label in FLAGS],
+            ["All"] + [label for _, label in flags_all],
             key="ev_flag_filter",
         )
 
@@ -219,8 +284,8 @@ with tab_evidence:
         with col2:
             bulk_flag = st.selectbox(
                 "Flag",
-                [code for code, _ in FLAGS],
-                format_func=lambda x: dict(FLAGS).get(x, x),
+                [code for code, _ in flags_all],
+                format_func=lambda x: dict(flags_all).get(x, x),
                 key="bulk_flag",
             )
         with col3:
@@ -372,10 +437,10 @@ with tab_evidence:
                     with qcol2:
                         q_flag = st.selectbox(
                             "Flag",
-                            [code for code, _ in FLAGS],
-                            format_func=lambda x: dict(FLAGS).get(x, x),
-                            index=[code for code, _ in FLAGS].index(existing_tag["flag"])
-                                   if existing_tag and existing_tag.get("flag") in [c for c, _ in FLAGS]
+                            [code for code, _ in flags_all],
+                            format_func=lambda x: dict(flags_all).get(x, x),
+                            index=[code for code, _ in flags_all].index(existing_tag["flag"])
+                                   if existing_tag and existing_tag.get("flag") in [c for c, _ in flags_all]
                                    else 0,
                             key=f"qf_{item_type}_{item_id}",
                         )
@@ -505,7 +570,7 @@ with tab_settings:
     if flag_counts:
         st.markdown("**By flag:**")
         for f, count in sorted(flag_counts.items()):
-            label = dict(FLAGS).get(f, f)
+            label = dict(flags_all).get(f, f)
             st.caption(f"  {label}: {count}")
 
     # Breakdown by legal issue
@@ -516,7 +581,7 @@ with tab_settings:
             issue_counts[i] = issue_counts.get(i, 0) + 1
     if issue_counts:
         st.markdown("**By legal issue:**")
-        all_issues = dict(LEGAL_ISSUES.get(active_case["case_type"], []))
+        all_issues = dict(get_issues_for_type(db, active_case["case_type"]))
         for i, count in sorted(issue_counts.items()):
             label = all_issues.get(i, i)
             st.caption(f"  {label}: {count}")

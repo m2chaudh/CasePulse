@@ -1,11 +1,11 @@
-"""Smoke tests for the Search page (pages/2_Search.py)."""
+"""Smoke tests for the Search page (pages_modules/search.py)."""
 import pytest
 
 
 def test_search_page_renders(page_test, tmp_db_with_case):
     """Page renders without errors when no query entered."""
     db, case_id = tmp_db_with_case
-    at = page_test("pages/2_Search.py")
+    at = page_test("pages_modules/search.py")
     at.session_state.db = db
     at.run()
     assert not at.exception
@@ -16,7 +16,7 @@ def test_search_page_renders(page_test, tmp_db_with_case):
 def test_search_page_shows_caption_on_empty_query(page_test, tmp_db_with_case):
     """When no query is entered the page shows the 'enter a search' caption."""
     db, case_id = tmp_db_with_case
-    at = page_test("pages/2_Search.py")
+    at = page_test("pages_modules/search.py")
     at.session_state.db = db
     at.run()
     assert not at.exception

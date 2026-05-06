@@ -1,5 +1,6 @@
 # UI
-streamlit>=1.30.0
+streamlit>=1.36
+streamlit-calendar>=1.3
 plotly>=5.18.0
 
 # Microsoft Auth & Graph API

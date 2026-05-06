@@ -7,7 +7,7 @@ from streamlit.testing.v1 import AppTest
 @pytest.fixture
 def page_test():
     """Build an AppTest for a given page. Caller passes the page path
-    relative to project root, e.g. 'pages/1_Case_Theory.py'."""
+    relative to project root, e.g. 'pages_modules/case_theory.py'."""
     def _build(page_path: str, *, default_timeout: float = 5.0):
         return AppTest.from_file(page_path, default_timeout=default_timeout)
     return _build

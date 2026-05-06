@@ -16,11 +16,11 @@ def _count_help_args(path: Path) -> int:
 
 
 def test_cases_page_has_field_helps():
-    assert _count_help_args(ROOT / "pages/4_Cases.py") >= 5
+    assert _count_help_args(ROOT / "pages_modules/cases.py") >= 5
 
 
 def test_witnesses_page_has_field_helps():
-    assert _count_help_args(ROOT / "pages/4A_Witnesses.py") >= 4
+    assert _count_help_args(ROOT / "pages_modules/witnesses.py") >= 4
 
 
 def test_argument_editor_has_field_helps():

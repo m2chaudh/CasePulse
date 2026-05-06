@@ -275,6 +275,31 @@ CREATE INDEX IF NOT EXISTS idx_evidence_tags_item ON evidence_tags(item_type, it
 CREATE INDEX IF NOT EXISTS idx_evidence_tags_case ON evidence_tags(case_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_item ON annotations(item_type, item_id);
 
+CREATE TABLE IF NOT EXISTS chatvault_exports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    source_dir TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    chat_name TEXT DEFAULT '',
+    registered_at TEXT DEFAULT (datetime('now')),
+    last_indexed_at TEXT,
+    message_count INTEGER DEFAULT 0,
+    notes TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS chatvault_anchors (
+    chat_message_id INTEGER NOT NULL,
+    export_id INTEGER NOT NULL,
+    anchor_id TEXT NOT NULL,
+    PRIMARY KEY (chat_message_id, export_id),
+    FOREIGN KEY (chat_message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (export_id) REFERENCES chatvault_exports(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chatvault_anchors_export
+    ON chatvault_anchors(export_id);
+CREATE INDEX IF NOT EXISTS idx_chatvault_anchors_msg
+    ON chatvault_anchors(chat_message_id);
+
 CREATE TABLE IF NOT EXISTS themes (
   id INTEGER PRIMARY KEY,
   case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
@@ -537,6 +562,52 @@ CREATE TABLE IF NOT EXISTS witness_statements (
 CREATE INDEX IF NOT EXISTS idx_witness_statements_witness ON witness_statements(witness_id);
 CREATE INDEX IF NOT EXISTS idx_witness_statements_contra ON witness_statements(contradiction_id);
 CREATE INDEX IF NOT EXISTS idx_witness_statements_arg ON witness_statements(argument_id);
+
+CREATE TABLE IF NOT EXISTS binder_filter_chips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    emoji TEXT DEFAULT '★',
+    filter_json TEXT NOT NULL,
+    pinned INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS case_relevant_senders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+    address TEXT NOT NULL,
+    role TEXT NOT NULL,
+    display_name TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(case_id, address)
+);
+
+CREATE TABLE IF NOT EXISTS item_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+    from_type TEXT NOT NULL,
+    from_id INTEGER NOT NULL,
+    to_type TEXT NOT NULL,
+    to_id INTEGER NOT NULL,
+    relationship TEXT NOT NULL,
+    note TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(case_id, from_type, from_id, to_type, to_id, relationship)
+);
+
+CREATE TABLE IF NOT EXISTS binder_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
 """
 
 
@@ -607,6 +678,75 @@ class Database:
                                      ["filename", "extracted_text"])
         self._backfill_fts_if_empty(cur, "annotations_fts", "annotations",
                                      ["note_text"])
+
+        # Case Binder Phase A: timeline_events.metadata_json
+        cur.execute("PRAGMA table_info(timeline_events)")
+        tl_cols = {row[1] for row in cur.fetchall()}
+        if 'metadata_json' not in tl_cols:
+            cur.execute("ALTER TABLE timeline_events ADD COLUMN metadata_json TEXT DEFAULT ''")
+
+        # Case Binder Phase A: ensure new tables exist on legacy DBs
+        for ddl in (
+            """CREATE TABLE IF NOT EXISTS binder_filter_chips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                emoji TEXT DEFAULT '★',
+                filter_json TEXT NOT NULL,
+                pinned INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )""",
+            """CREATE TABLE IF NOT EXISTS case_relevant_senders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+                address TEXT NOT NULL,
+                role TEXT NOT NULL,
+                display_name TEXT DEFAULT '',
+                notes TEXT DEFAULT '',
+                active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(case_id, address)
+            )""",
+            """CREATE TABLE IF NOT EXISTS item_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+                from_type TEXT NOT NULL,
+                from_id INTEGER NOT NULL,
+                to_type TEXT NOT NULL,
+                to_id INTEGER NOT NULL,
+                relationship TEXT NOT NULL,
+                note TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(case_id, from_type, from_id, to_type, to_id, relationship)
+            )""",
+            """CREATE TABLE IF NOT EXISTS binder_suggestions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )""",
+        ):
+            cur.execute(ddl)
+
+        # Case Binder Phase A: indexes
+        for idx_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_emails_date_received ON emails(date_received)",
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_timeline_date_case ON timeline_events(case_id, date)",
+            "CREATE INDEX IF NOT EXISTS idx_evidence_tags_case_type ON evidence_tags(case_id, item_type)",
+            "CREATE INDEX IF NOT EXISTS idx_binder_filter_chips_case ON binder_filter_chips(case_id, sort_order)",
+            "CREATE INDEX IF NOT EXISTS idx_case_senders_case ON case_relevant_senders(case_id, active)",
+            "CREATE INDEX IF NOT EXISTS idx_case_senders_addr ON case_relevant_senders(address)",
+            "CREATE INDEX IF NOT EXISTS idx_item_links_from ON item_links(case_id, from_type, from_id)",
+            "CREATE INDEX IF NOT EXISTS idx_item_links_to ON item_links(case_id, to_type, to_id)",
+            "CREATE INDEX IF NOT EXISTS idx_binder_suggestions_pending ON binder_suggestions(case_id, status)",
+        ):
+            cur.execute(idx_sql)
 
         conn.commit()
 
