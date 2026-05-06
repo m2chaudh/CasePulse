@@ -368,8 +368,59 @@ else:
                     )
                     st.rerun()
 st.divider()
+
+
+# ── Section 4: Email thread backfill ─────────────────────────────────────
+st.markdown("### Email thread backfill")
 st.caption(
-    "These migrations only modify `chat_messages`. Future imports won't "
-    "re-introduce the patterns — the original ingest logic is unchanged "
-    "but new ingests handle these cases correctly."
+    "Resolves each email's `In-Reply-To` (or last `References`) header "
+    "to a Message-ID we already have, then sets `parent_email_id` and "
+    "flips `is_reply=1` on success. Thread-aware email views walk this "
+    "chain — without it, replies look like isolated messages. "
+    "Idempotent. New email fetches now auto-run this; the button below "
+    "is for the existing data."
+)
+
+from casepulse.scripts.backfill_email_parents import backfill as _email_backfill
+
+_thr_dry = _email_backfill(db, apply_changes=False)
+_cols_thr = st.columns(4)
+_cols_thr[0].metric("Total scanned", _thr_dry["total"])
+_cols_thr[1].metric("Would link", _thr_dry["linked"])
+_cols_thr[2].metric("Already linked", _thr_dry["already_linked"])
+_cols_thr[3].metric("Parent missing", _thr_dry["parent_missing"])
+
+with st.expander("Why-not breakdown", expanded=False):
+    st.text(f"  No In-Reply-To / References header: {_thr_dry['no_header']}")
+    st.text(f"  Header points outside our DB:       {_thr_dry['parent_missing']}")
+    st.text(f"  Self-reference (skipped):           {_thr_dry['self_reference']}")
+    st.caption(
+        "`Parent missing` typically means the parent was sent before "
+        "the date range we fetched. Re-fetch with an earlier start "
+        "date to recover those threads."
+    )
+
+if _thr_dry["linked"] == 0:
+    st.info("Nothing to link — every reply we have a parent for is "
+            "already linked.")
+else:
+    if st.button(
+        "Apply email thread backfill", type="primary",
+        key="apply_thread_backfill",
+    ):
+        if backup_first:
+            path = _backup_db()
+            if path:
+                st.info(f"Backup written to `{path}`")
+        stats = _email_backfill(db, apply_changes=True)
+        st.success(
+            f"Done. {stats['linked']} emails linked to their parents."
+        )
+        st.rerun()
+
+st.divider()
+st.caption(
+    "These migrations only modify `chat_messages` and `emails`. Future "
+    "imports won't re-introduce the patterns — the original ingest "
+    "logic is unchanged but new ingests handle these cases correctly."
 )
