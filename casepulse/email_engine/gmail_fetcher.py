@@ -288,10 +288,22 @@ class GmailFetcher:
             self.db.complete_sync(sync_id, "failed", str(e))
             raise
 
+        # Auto-link any new replies to their parents using In-Reply-To /
+        # References headers. Cheap (single-pass JSON parse) and ensures
+        # the thread-aware email view stays current after every fetch.
+        threads_linked = 0
+        if total_fetched:
+            from casepulse.scripts.backfill_email_parents import backfill
+            try:
+                threads_linked = backfill(self.db, apply_changes=True)["linked"]
+            except Exception as e:
+                errors.append(f"Thread backfill failed: {e}")
+
         return {
             "emails_fetched": total_fetched,
             "attachments_downloaded": total_attachments,
             "duplicates_skipped": total_skipped,
+            "threads_linked": threads_linked,
             "errors": errors,
         }
 
