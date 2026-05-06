@@ -34,3 +34,14 @@ config.json
 
 # Brainstorming visual companion (mockups, transient)
 .superpowers/
+
+# Test coverage state
+.coverage
+htmlcov/
+
+# Build-time icon intermediates — assets/generate_icon.py emits these
+# locally; build_mac.sh copies them to the project root, where the
+# tracked copies ship with the app.
+assets/icon.icns
+assets/icon.ico
+assets/icon.png
