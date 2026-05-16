@@ -654,6 +654,32 @@ class Database:
         if 'row_hash' not in audit_cols:
             cur.execute("ALTER TABLE audit_log ADD COLUMN row_hash TEXT")
 
+        # Backfill the hash chain for any pre-existing rows with NULL
+        # row_hash. Hashes are computed against the row's stored
+        # created_at — this does NOT attest to events before backfill,
+        # only that no row written or modified after this point can be
+        # changed without breaking verify_audit_chain().
+        cur.execute(
+            "SELECT id, action, details, created_at, prev_hash, row_hash "
+            "FROM audit_log ORDER BY id ASC"
+        )
+        audit_rows = cur.fetchall()
+        prev_chain = ""
+        for r in audit_rows:
+            r_id, action, details, created_at, stored_prev, stored_row = r
+            if stored_row:
+                # Already hashed — trust it and chain forward
+                prev_chain = stored_row
+                continue
+            payload = (f"{prev_chain}|{action or ''}|{details or ''}|"
+                       f"{created_at or ''}")
+            new_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            cur.execute(
+                "UPDATE audit_log SET prev_hash=?, row_hash=? WHERE id=?",
+                (prev_chain, new_hash, r_id),
+            )
+            prev_chain = new_hash
+
         # Task 1.10: backfill chat_messages.content_hash for legacy rows
         # Canonical formula: sha256(f"{timestamp}|{sender}|{message_text}")
         cur.execute(
@@ -1664,12 +1690,32 @@ class Database:
             return row["value"] if row else default
 
     # ── Audit log ──
+    #
+    # Each row is hash-chained: row_hash = sha256(prev_hash | action |
+    # details | created_at). Snapping the chain (deleting or editing
+    # a row) breaks verify_audit_chain() at the affected row. The first
+    # row's prev_hash is the empty string.
 
     def log_action(self, action: str, details: str = ""):
+        import hashlib
         with self._get_conn() as conn:
+            prev = conn.execute(
+                "SELECT row_hash FROM audit_log ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = (prev["row_hash"] if prev and prev["row_hash"]
+                          else "")
+            # created_at is set by the DB default; compute it here so it
+            # is identical to what the row will store.
+            created_at = conn.execute(
+                "SELECT datetime('now') AS ts"
+            ).fetchone()["ts"]
+            payload = f"{prev_hash}|{action}|{details}|{created_at}"
+            row_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
             conn.execute(
-                "INSERT INTO audit_log (action, details) VALUES (?, ?)",
-                (action, details)
+                "INSERT INTO audit_log "
+                "(action, details, created_at, prev_hash, row_hash) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (action, details, created_at, prev_hash, row_hash),
             )
 
     def get_audit_log(self, limit: int = 100) -> list[dict]:
@@ -1678,6 +1724,44 @@ class Database:
                 "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def verify_audit_chain(self) -> dict:
+        """Walk the audit log in insertion order, recomputing each
+        row_hash from (prev_hash | action | details | created_at).
+        Returns {'valid': bool, 'rows_checked': int, 'first_bad_id': id|None,
+        'reason': str}. Used by court-bound provenance assertions:
+        breaking even one row's hash invalidates everything after it.
+        """
+        import hashlib
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, action, details, created_at, prev_hash, "
+                "row_hash FROM audit_log ORDER BY id ASC"
+            ).fetchall()
+        prev_hash = ""
+        for i, r in enumerate(rows):
+            if r["prev_hash"] != prev_hash:
+                return {
+                    "valid": False, "rows_checked": i,
+                    "first_bad_id": r["id"],
+                    "reason": (f"prev_hash mismatch at id={r['id']}: "
+                               f"expected {prev_hash!r}, got "
+                               f"{r['prev_hash']!r}"),
+                }
+            payload = (f"{r['prev_hash'] or ''}|{r['action'] or ''}|"
+                       f"{r['details'] or ''}|{r['created_at'] or ''}")
+            expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if r["row_hash"] != expected:
+                return {
+                    "valid": False, "rows_checked": i,
+                    "first_bad_id": r["id"],
+                    "reason": (f"row_hash mismatch at id={r['id']}: "
+                               f"row was edited or migrated without "
+                               f"recomputing the chain"),
+                }
+            prev_hash = r["row_hash"]
+        return {"valid": True, "rows_checked": len(rows),
+                "first_bad_id": None, "reason": ""}
 
     # ── Background jobs ──
 
