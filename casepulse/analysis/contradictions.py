@@ -151,15 +151,31 @@ Categories: access, custody, financial, incident, promise, legal, communication,
                     continue
                 parts = line.split("|")
                 if len(parts) >= 2:
+                    date_part = parts[0].strip()
+                    # Attribute the extracted statement to the actual
+                    # message in this window with that date — mirrors
+                    # the email loop above. Falls back to win[0] only
+                    # when the LLM-emitted date doesn't match any
+                    # message in the window. Without this every
+                    # statement was attributed to win[0]["id"] and the
+                    # citation in court PDFs pointed at the wrong row.
+                    source_msg = win[0]
+                    if date_part:
+                        date_prefix = date_part[:10]
+                        for m in win:
+                            if date_prefix in (m.get("timestamp") or "")[:10]:
+                                source_msg = m
+                                break
+
                     statements.append({
-                        "date": parts[0].strip(),
+                        "date": date_part,
                         "statement": parts[1].strip(),
                         "category": parts[2].strip().lower() if len(parts) > 2 else "other",
                         "sender": sender_email or sender_name,
                         "sender_name": sender_name,
                         "source_type": "chat",
-                        "source_id": win[0]["id"],
-                        "source_subject": f"Chat: {win[0].get('chat_name', '')}",
+                        "source_id": source_msg["id"],
+                        "source_subject": f"Chat: {source_msg.get('chat_name', '')}",
                     })
 
         except Exception as e:
@@ -229,55 +245,18 @@ Categories: access, custody, financial, incident, promise, legal, allegation, ot
                 if progress_cb:
                     progress_cb(f"Attachment error ({att['filename']}): {e}")
 
-    # Also extract from imported documents
-    docs = db.get_documents(ocr_status="done")
-    if docs:
-        if progress_cb:
-            progress_cb(f"Scanning {len(docs)} imported documents...")
-
-        for doc in docs:
-            text = doc.get("extracted_text", "")[:2000]
-            if len(text) < 50:
-                continue
-
-            prompt = f"""Extract factual claims, allegations, and key statements from this document.
-
-Document: {doc['filename']}
-Content:
-{text}
-
-Format: DATE | STATEMENT | CATEGORY
-Categories: access, custody, financial, incident, promise, legal, allegation, police_report, court_order, other"""
-
-            try:
-                response = llm.query(
-                    system_prompt="You extract factual claims from legal documents. Focus on allegations, police findings, court orders, and specific claims with dates.",
-                    user_prompt=prompt,
-                )
-
-                for line in response.strip().split("\n"):
-                    line = line.strip()
-                    if "|" not in line:
-                        continue
-                    parts = line.split("|")
-                    if len(parts) >= 2 and len(parts[1].strip()) > 10:
-                        statements.append({
-                            "date": parts[0].strip(),
-                            "statement": parts[1].strip(),
-                            "category": parts[2].strip().lower() if len(parts) > 2 else "other",
-                            "sender": "document",
-                            "sender_name": doc["filename"],
-                            "source_type": "document",
-                            "source_id": doc["id"],
-                            "source_subject": f"Document: {doc['filename']}",
-                        })
-
-            except Exception as e:
-                if progress_cb:
-                    progress_cb(f"Document error ({doc['filename']}): {e}")
+    # NOTE: A previous version of this function appended statements from
+    # every document in `documents` (police reports, the user's own
+    # filings, anything imported) into THIS sender's statement list.
+    # find_contradictions then asked the LLM to flag contradictions
+    # "within {person_name}'s statements" — and the LLM dutifully
+    # produced false positives between the sender's chats and documents
+    # they themselves filed. Documents are third-party content and
+    # belong in a separate cross-source comparison pass, not in a
+    # per-sender extraction.
 
     if progress_cb:
-        progress_cb(f"Done: {len(statements)} statements extracted from {sender_name or sender_email} (emails + chats + attachments + documents)")
+        progress_cb(f"Done: {len(statements)} statements extracted from {sender_name or sender_email} (emails + chats + attachments)")
 
     return statements
 

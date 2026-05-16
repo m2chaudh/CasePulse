@@ -33,6 +33,19 @@ _CACHE_TTL_SEC = 30
 _CACHE_KEY = "_density_count_cache"
 
 
+def clear_density_cache() -> None:
+    """Drop every memoised per-day count.
+
+    Call after any operation that adds/removes chat_messages, emails,
+    timeline_events, documents, attachments, or evidence_tags — the
+    legacy TTL-only cache could show stale counts for up to 30 s after
+    a migration apply, which lied to the user about how much data the
+    calendar would render."""
+    import streamlit as st  # noqa: F401  (already imported at module top)
+    if _CACHE_KEY in st.session_state:
+        st.session_state[_CACHE_KEY] = {}
+
+
 def _count_items_for_day(db: Database, case_id: int, day: date) -> int:
     """Count all aggregator-visible items for a given day. Mirrors the
     aggregator's 'exclude only items tagged to a different case' rule.

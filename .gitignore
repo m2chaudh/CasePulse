@@ -39,6 +39,14 @@ config.json
 .coverage
 htmlcov/
 
+# Stray SQLite files (the real DB lives under data/, which is already
+# ignored). Keeps a passing Database() invocation from the project root
+# from leaving a 0-byte casepulse.db behind for accidental commits.
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
 # Build-time icon intermediates — assets/generate_icon.py emits these
 # locally; build_mac.sh copies them to the project root, where the
 # tracked copies ship with the app.

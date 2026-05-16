@@ -642,8 +642,15 @@ class Database:
 
         Each step checks for the change before applying. Safe to run on every
         Database() construction.
+
+        Wrapped in a `with self._get_conn() as conn:` so any error
+        anywhere in the migration rolls the transaction back cleanly
+        rather than leaving half-applied schema state.
         """
-        conn = self._get_conn()
+        with self._get_conn() as conn:
+            self._run_migrations_inner(conn)
+
+    def _run_migrations_inner(self, conn) -> None:
         cur = conn.cursor()
 
         # Task 1.9: audit_log hash chain columns
@@ -653,6 +660,32 @@ class Database:
             cur.execute("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT")
         if 'row_hash' not in audit_cols:
             cur.execute("ALTER TABLE audit_log ADD COLUMN row_hash TEXT")
+
+        # Backfill the hash chain for any pre-existing rows with NULL
+        # row_hash. Hashes are computed against the row's stored
+        # created_at — this does NOT attest to events before backfill,
+        # only that no row written or modified after this point can be
+        # changed without breaking verify_audit_chain().
+        cur.execute(
+            "SELECT id, action, details, created_at, prev_hash, row_hash "
+            "FROM audit_log ORDER BY id ASC"
+        )
+        audit_rows = cur.fetchall()
+        prev_chain = ""
+        for r in audit_rows:
+            r_id, action, details, created_at, stored_prev, stored_row = r
+            if stored_row:
+                # Already hashed — trust it and chain forward
+                prev_chain = stored_row
+                continue
+            payload = (f"{prev_chain}|{action or ''}|{details or ''}|"
+                       f"{created_at or ''}")
+            new_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            cur.execute(
+                "UPDATE audit_log SET prev_hash=?, row_hash=? WHERE id=?",
+                (prev_chain, new_hash, r_id),
+            )
+            prev_chain = new_hash
 
         # Task 1.10: backfill chat_messages.content_hash for legacy rows
         # Canonical formula: sha256(f"{timestamp}|{sender}|{message_text}")
@@ -748,11 +781,44 @@ class Database:
         ):
             cur.execute(idx_sql)
 
-        conn.commit()
+        # Commit handled by the `with self._get_conn()` context manager
+        # in _run_migrations — any error inside this method rolls back.
+
+    # FTS backfill identifiers must match an allowlist before being
+    # interpolated into SQL (SQLite doesn't parameterise table or column
+    # names). All current callers pass hardcoded strings, but defending
+    # at the helper means a future caller can't accidentally widen the
+    # surface.
+    _FTS_BACKFILL_ALLOW = {
+        "emails_fts":         ("emails",         {"subject", "body_text"}),
+        "chat_messages_fts":  ("chat_messages",  {"message_text", "sender", "chat_name"}),
+        "attachments_fts":    ("attachments",    {"filename", "extracted_text"}),
+        "documents_fts":      ("documents",      {"filename", "extracted_text"}),
+        "annotations_fts":    ("annotations",    {"note_text"}),
+    }
 
     def _backfill_fts_if_empty(self, cur, fts_table: str, source_table: str,
                                 select_cols: list) -> None:
         """Backfill an FTS5 contentless table from its source table if under-indexed."""
+        allowed = self._FTS_BACKFILL_ALLOW.get(fts_table)
+        if not allowed:
+            raise ValueError(
+                f"_backfill_fts_if_empty: unknown fts_table {fts_table!r}"
+            )
+        expected_source, allowed_cols = allowed
+        if source_table != expected_source:
+            raise ValueError(
+                f"_backfill_fts_if_empty: source_table {source_table!r} "
+                f"does not match allowlist for {fts_table!r} "
+                f"(expected {expected_source!r})"
+            )
+        unknown = set(select_cols) - allowed_cols
+        if unknown:
+            raise ValueError(
+                f"_backfill_fts_if_empty: column(s) {sorted(unknown)} "
+                f"not in allowlist for {fts_table!r}"
+            )
+
         cur.execute(f"SELECT COUNT(*) FROM {fts_table}")
         fts_count = cur.fetchone()[0]
         cur.execute(f"SELECT COUNT(*) FROM {source_table}")
@@ -792,7 +858,35 @@ class Database:
             return dict(row) if row else None
 
     def delete_account(self, account_id: int):
+        """Delete an account, its emails, AND every polymorphic record
+        that pointed at those emails (evidence_tags/annotations/evidence
+        with item_type/source_table = 'email' or 'emails'). Without
+        this cleanup, the Case Theory Workbench retains arguments
+        whose evidence rows resolve to `[source row deleted]`.
+        """
         with self._get_conn() as conn:
+            email_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM emails WHERE account_id = ?", (account_id,)
+            ).fetchall()]
+            if email_ids:
+                placeholders = ",".join("?" * len(email_ids))
+                conn.execute(
+                    f"DELETE FROM evidence_tags "
+                    f"WHERE item_type = 'email' AND item_id IN ({placeholders})",
+                    email_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM annotations "
+                    f"WHERE item_type = 'email' AND item_id IN ({placeholders})",
+                    email_ids,
+                )
+                # Case Theory `evidence` rows reference by (source_table,
+                # source_row_id); argument_evidence cascades from there.
+                conn.execute(
+                    f"DELETE FROM evidence "
+                    f"WHERE source_table = 'emails' AND source_row_id IN ({placeholders})",
+                    email_ids,
+                )
             conn.execute("DELETE FROM emails WHERE account_id = ?", (account_id,))
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
 
@@ -1371,15 +1465,39 @@ class Database:
             return [dict(r) for r in rows]
 
     def delete_chat_import(self, import_id: int):
-        """Delete a chat import and all its messages."""
+        """Delete a chat import + its messages + their dependents.
+
+        evidence_tags and annotations are polymorphic (item_type='chat',
+        item_id=chat_messages.id) so SQLite can't auto-cascade them
+        from a chat_messages delete. The exhibit bundle later queries
+        these tags by case_id, finds them, tries to load the message,
+        gets nothing, and silently skips — leaving TOC gaps in a court
+        filing. Clean them up here in the same transaction.
+        """
         with self._get_conn() as conn:
             imp = conn.execute(
                 "SELECT source_file FROM chat_imports WHERE id = ?", (import_id,)
             ).fetchone()
             if imp:
+                msg_ids = [r["id"] for r in conn.execute(
+                    "SELECT id FROM chat_messages WHERE source_file = ?",
+                    (imp["source_file"],),
+                ).fetchall()]
+                if msg_ids:
+                    placeholders = ",".join("?" * len(msg_ids))
+                    conn.execute(
+                        f"DELETE FROM evidence_tags "
+                        f"WHERE item_type = 'chat' AND item_id IN ({placeholders})",
+                        msg_ids,
+                    )
+                    conn.execute(
+                        f"DELETE FROM annotations "
+                        f"WHERE item_type = 'chat' AND item_id IN ({placeholders})",
+                        msg_ids,
+                    )
                 conn.execute(
                     "DELETE FROM chat_messages WHERE source_file = ?",
-                    (imp["source_file"],)
+                    (imp["source_file"],),
                 )
             conn.execute("DELETE FROM chat_imports WHERE id = ?", (import_id,))
 
@@ -1512,18 +1630,21 @@ class Database:
             conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
 
     def get_next_exhibit_number(self, case_id: int) -> int:
+        """Atomically claim the next exhibit number for this case.
+
+        Two concurrent callers would previously read the same value
+        before either incremented it, producing duplicate exhibit
+        labels — a court-bundle inadmissibility risk. Uses a single
+        UPDATE ... RETURNING statement (SQLite 3.35+) so the read and
+        the increment happen under one write lock.
+        """
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT next_exhibit_num FROM cases WHERE id = ?", (case_id,)
+                "UPDATE cases SET next_exhibit_num = next_exhibit_num + 1 "
+                "WHERE id = ? RETURNING next_exhibit_num - 1 AS claimed",
+                (case_id,),
             ).fetchone()
-            if row:
-                num = row["next_exhibit_num"]
-                conn.execute(
-                    "UPDATE cases SET next_exhibit_num = ? WHERE id = ?",
-                    (num + 1, case_id)
-                )
-                return num
-            return 1
+            return row["claimed"] if row else 1
 
     # ── Evidence tag operations ──
 
@@ -1664,12 +1785,32 @@ class Database:
             return row["value"] if row else default
 
     # ── Audit log ──
+    #
+    # Each row is hash-chained: row_hash = sha256(prev_hash | action |
+    # details | created_at). Snapping the chain (deleting or editing
+    # a row) breaks verify_audit_chain() at the affected row. The first
+    # row's prev_hash is the empty string.
 
     def log_action(self, action: str, details: str = ""):
+        import hashlib
         with self._get_conn() as conn:
+            prev = conn.execute(
+                "SELECT row_hash FROM audit_log ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = (prev["row_hash"] if prev and prev["row_hash"]
+                          else "")
+            # created_at is set by the DB default; compute it here so it
+            # is identical to what the row will store.
+            created_at = conn.execute(
+                "SELECT datetime('now') AS ts"
+            ).fetchone()["ts"]
+            payload = f"{prev_hash}|{action}|{details}|{created_at}"
+            row_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
             conn.execute(
-                "INSERT INTO audit_log (action, details) VALUES (?, ?)",
-                (action, details)
+                "INSERT INTO audit_log "
+                "(action, details, created_at, prev_hash, row_hash) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (action, details, created_at, prev_hash, row_hash),
             )
 
     def get_audit_log(self, limit: int = 100) -> list[dict]:
@@ -1678,6 +1819,44 @@ class Database:
                 "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def verify_audit_chain(self) -> dict:
+        """Walk the audit log in insertion order, recomputing each
+        row_hash from (prev_hash | action | details | created_at).
+        Returns {'valid': bool, 'rows_checked': int, 'first_bad_id': id|None,
+        'reason': str}. Used by court-bound provenance assertions:
+        breaking even one row's hash invalidates everything after it.
+        """
+        import hashlib
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, action, details, created_at, prev_hash, "
+                "row_hash FROM audit_log ORDER BY id ASC"
+            ).fetchall()
+        prev_hash = ""
+        for i, r in enumerate(rows):
+            if r["prev_hash"] != prev_hash:
+                return {
+                    "valid": False, "rows_checked": i,
+                    "first_bad_id": r["id"],
+                    "reason": (f"prev_hash mismatch at id={r['id']}: "
+                               f"expected {prev_hash!r}, got "
+                               f"{r['prev_hash']!r}"),
+                }
+            payload = (f"{r['prev_hash'] or ''}|{r['action'] or ''}|"
+                       f"{r['details'] or ''}|{r['created_at'] or ''}")
+            expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if r["row_hash"] != expected:
+                return {
+                    "valid": False, "rows_checked": i,
+                    "first_bad_id": r["id"],
+                    "reason": (f"row_hash mismatch at id={r['id']}: "
+                               f"row was edited or migrated without "
+                               f"recomputing the chain"),
+                }
+            prev_hash = r["row_hash"]
+        return {"valid": True, "rows_checked": len(rows),
+                "first_bad_id": None, "reason": ""}
 
     # ── Background jobs ──
 

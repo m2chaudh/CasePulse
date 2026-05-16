@@ -21,6 +21,7 @@ from casepulse.scripts.repair_chat_bundles import (
 from casepulse.scripts.clean_appclose_chats import (
     _clean, repair as run_appclose_repair,
 )
+from casepulse.binder.density_bar import clear_density_cache
 from casepulse.config import get_data_dir
 
 
@@ -119,6 +120,7 @@ if st.button("Apply WhatsApp bundle repair", type="primary",
         if path:
             st.info(f"Backup written to `{path}`")
     stats = run_bundle_repair(db, apply_changes=True)
+    clear_density_cache()
     st.success(
         f"Done. {stats['sub_messages_inserted']} new chat rows inserted, "
         f"{stats['parents_trimmed']} parents trimmed."
@@ -181,6 +183,7 @@ if st.button("Apply AppClose cleanup", type="primary",
         if path:
             st.info(f"Backup written to `{path}`")
     stats = run_appclose_repair(db, apply_changes=True)
+    clear_density_cache()
     st.success(f"Done. {stats['would_clean']} chat rows cleaned.")
     st.rerun()
 
@@ -361,6 +364,7 @@ else:
                     stats = apply_v2(
                         db, _pdf_path, apply_changes=True, parsed=parsed,
                     )
+                    clear_density_cache()
                     st.success(
                         f"Done. {stats['old_rows']} old rows replaced "
                         f"with {stats['new_rows']} v2 rows. "
