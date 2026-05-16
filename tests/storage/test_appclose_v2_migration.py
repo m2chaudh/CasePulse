@@ -140,6 +140,29 @@ def test_apply_updates_chat_imports_row(tmp_db):
     assert imp["date_end"] == "2024-12-01T09:00:00"
 
 
+def test_apply_inserts_chat_imports_when_missing(tmp_db):
+    """If no chat_imports row exists for the PDF (fresh DB, or the
+    import record was cleared), apply_v2 INSERTs one instead of
+    silently leaving Import Chats blank."""
+    from casepulse.scripts.apply_appclose_v2 import apply_v2
+
+    pdf = "/fake/Conversations.pdf"
+    # NOTE: no _seed_v1_rows + no chat_imports row at all
+    parsed = [
+        _make_parsed("Alice", datetime(2024, 9, 16, 16, 55), "fresh"),
+    ]
+    apply_v2(tmp_db, pdf, apply_changes=True, parsed=parsed)
+
+    with tmp_db._get_conn() as conn:
+        imp = conn.execute(
+            "SELECT source_file, platform, message_count FROM chat_imports "
+            "WHERE source_file = ?", (pdf,),
+        ).fetchone()
+    assert imp is not None
+    assert imp["platform"] == "AppClose"
+    assert imp["message_count"] == 1
+
+
 def test_apply_is_idempotent(tmp_db):
     pdf = "/fake/Conversations.pdf"
     _seed_v1_rows(tmp_db, pdf, [

@@ -195,7 +195,10 @@ def apply_v2(
             [tuple(r[c] for c in cols) for r in rows_to_insert],
         )
 
-        # Update chat_imports row for this PDF (if present)
+        # Update or insert the chat_imports row for this PDF.
+        # Previously a missing row left the apply silently
+        # incomplete: chat_messages were written but Import Chats had
+        # no listing for them.
         existing_import = conn.execute(
             "SELECT id FROM chat_imports WHERE source_file = ? "
             "AND platform IN ('appclose','AppClose') ORDER BY id DESC LIMIT 1",
@@ -207,6 +210,14 @@ def apply_v2(
                 "date_start = ?, date_end = ? WHERE id = ?",
                 (len(rows_to_insert), date_start, date_end,
                  existing_import["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO chat_imports (source_file, source_type, "
+                "platform, chat_name, message_count, date_start, "
+                "date_end, participants) VALUES "
+                "(?, 'appclose', 'AppClose', 'AppClose', ?, ?, ?, '[]')",
+                (pdf_path, len(rows_to_insert), date_start, date_end),
             )
 
     stats["applied"] = True
