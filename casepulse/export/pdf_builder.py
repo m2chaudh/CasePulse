@@ -503,10 +503,10 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
         subtitle=case_name,
     )
 
-    # Build TOC items and exhibit data
-    toc_items = []
+    # Collect exhibit data (no page numbers yet — those come from
+    # the dry-render pass below).
     exhibits = []
-    page_counter = 3  # cover + TOC start at page 3
+    toc_meta = []  # per-exhibit metadata for the TOC (no page yet)
 
     for tag in tags:
         exhibit_label = tag.get("exhibit_label", "")
@@ -521,28 +521,20 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
             if not email:
                 continue
             attachments = db.get_attachments_for_email(item_id)
-            toc_items.append({
+            toc_meta.append({
                 "exhibit_label": exhibit_label,
                 "date": str(email.get("date_received", ""))[:10],
                 "sender": email.get("sender_email", ""),
                 "subject": email.get("subject", ""),
-                "page": page_counter,
             })
             exhibits.append({
-                "type": "email",
-                "label": exhibit_label,
-                "data": email,
-                "attachments": attachments,
+                "type": "email", "label": exhibit_label,
+                "data": email, "attachments": attachments,
             })
-            page_counter += 1  # Estimate
 
         elif item_type == "chat":
             # Fetch the target chat row and the 10 messages on each side
             # of it in CHRONOLOGICAL order, scoped to the same chat_name.
-            # The legacy `id BETWEEN item_id-10 AND item_id+10` query
-            # was broken after the AppClose v2 migration scrambled
-            # autoincrement ids — a court PDF could render context from
-            # a different week.
             with db._get_conn() as _conn:
                 chat_msg = _conn.execute(
                     "SELECT * FROM chat_messages WHERE id = ?", (item_id,)
@@ -552,9 +544,6 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
                 chat_msgs_data = []
                 if chat_msg:
                     chat_name = chat_msg["chat_name"] or ""
-                    # Window-function: rank rows by (timestamp, id) within
-                    # the chat, find the target's rank, then take ±10 by
-                    # rank. Ties broken by id so rank is deterministic.
                     nearby = _conn.execute(
                         """WITH ranked AS (
                              SELECT *, ROW_NUMBER() OVER (
@@ -573,38 +562,55 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
                     ).fetchall()
                     chat_msgs_data = [dict(m) for m in nearby]
 
-            toc_items.append({
+            toc_meta.append({
                 "exhibit_label": exhibit_label,
                 "date": (chat_msg["timestamp"] or "")[:10] if chat_msg else "",
                 "sender": chat_msg["sender"] if chat_msg else "Chat",
                 "subject": chat_name,
-                "page": page_counter,
             })
             exhibits.append({
-                "type": "chat",
-                "label": exhibit_label,
-                "data": chat_msgs_data,
-                "chat_name": chat_name,
+                "type": "chat", "label": exhibit_label,
+                "data": chat_msgs_data, "chat_name": chat_name,
             })
-            page_counter += 1
 
-    # Add TOC
+    # The TOC page numbers must reflect ACTUAL page counts per exhibit
+    # (a long email body spans multiple pages — the legacy
+    # `page_counter += 1` estimate was always wrong for those). Solve
+    # with a two-pass render: first a dry pass that learns each
+    # exhibit's start page, then the real pass with accurate TOC.
+    def _render_exhibits(target_pdf):
+        """Return [start_page_no] in exhibit order. Mutates target_pdf."""
+        starts = []
+        for ex in exhibits:
+            starts.append(target_pdf.page_no() + 1)
+            if ex["type"] == "email":
+                target_pdf.add_email_exhibit(
+                    ex["data"], ex["label"], ex.get("attachments", []),
+                )
+            elif ex["type"] == "chat":
+                target_pdf.add_chat_exhibit(
+                    ex["data"], ex["label"],
+                    chat_name=ex.get("chat_name", ""),
+                )
+        return starts
+
+    # ── Pass 1: dry render to measure ────────────────────────────────
+    dry = CasePulsePDF(case_name=case_name, case_number=case_number,
+                       exhibit_prefix=exhibit_prefix)
+    dry.add_cover_page(title="Exhibit Bundle", subtitle=case_name)
+    # Use an approximate TOC so its own page span matches what the real
+    # pass will produce. The TOC layout is deterministic given identical
+    # items, so the dry TOC's page count equals the real TOC's page
+    # count — exhibit start pages from the dry pass are exact.
+    dry.add_toc([{**m, "page": 0} for m in toc_meta])
+    dry_starts = _render_exhibits(dry)
+
+    # ── Pass 2: real render with accurate page numbers ───────────────
+    toc_items = [
+        {**m, "page": p} for m, p in zip(toc_meta, dry_starts)
+    ]
     pdf.add_toc(toc_items)
-
-    # Add exhibits
-    for exhibit in exhibits:
-        if exhibit["type"] == "email":
-            pdf.add_email_exhibit(
-                exhibit["data"],
-                exhibit["label"],
-                exhibit.get("attachments", []),
-            )
-        elif exhibit["type"] == "chat":
-            pdf.add_chat_exhibit(
-                exhibit["data"],
-                exhibit["label"],
-                chat_name=exhibit.get("chat_name", ""),
-            )
+    _render_exhibits(pdf)
 
     return pdf.output()
 
