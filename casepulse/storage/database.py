@@ -642,8 +642,15 @@ class Database:
 
         Each step checks for the change before applying. Safe to run on every
         Database() construction.
+
+        Wrapped in a `with self._get_conn() as conn:` so any error
+        anywhere in the migration rolls the transaction back cleanly
+        rather than leaving half-applied schema state.
         """
-        conn = self._get_conn()
+        with self._get_conn() as conn:
+            self._run_migrations_inner(conn)
+
+    def _run_migrations_inner(self, conn) -> None:
         cur = conn.cursor()
 
         # Task 1.9: audit_log hash chain columns
@@ -774,7 +781,8 @@ class Database:
         ):
             cur.execute(idx_sql)
 
-        conn.commit()
+        # Commit handled by the `with self._get_conn()` context manager
+        # in _run_migrations — any error inside this method rolls back.
 
     def _backfill_fts_if_empty(self, cur, fts_table: str, source_table: str,
                                 select_cols: list) -> None:
