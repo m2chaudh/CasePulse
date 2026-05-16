@@ -537,29 +537,41 @@ def build_exhibit_bundle_pdf(db: Database, case_id: int,
             page_counter += 1  # Estimate
 
         elif item_type == "chat":
-            import sqlite3 as _sql
-            _chat_conn = _sql.connect(str(db.db_path))
-            _chat_conn.row_factory = _sql.Row
-            chat_msg = _chat_conn.execute(
-                "SELECT * FROM chat_messages WHERE id = ?", (item_id,)
-            ).fetchone()
-            _chat_conn.close()
+            # Fetch the target chat row and the 10 messages on each side
+            # of it in CHRONOLOGICAL order, scoped to the same chat_name.
+            # The legacy `id BETWEEN item_id-10 AND item_id+10` query
+            # was broken after the AppClose v2 migration scrambled
+            # autoincrement ids — a court PDF could render context from
+            # a different week.
+            with db._get_conn() as _conn:
+                chat_msg = _conn.execute(
+                    "SELECT * FROM chat_messages WHERE id = ?", (item_id,)
+                ).fetchone()
 
-            chat_name = ""
-            chat_msgs_data = []
-            if chat_msg:
-                chat_name = chat_msg["chat_name"] or ""
-                # Get nearby messages for context (same chat, ±10 messages)
-                _chat_conn2 = _sql.connect(str(db.db_path))
-                _chat_conn2.row_factory = _sql.Row
-                nearby = _chat_conn2.execute(
-                    """SELECT * FROM chat_messages
-                       WHERE chat_name = ? AND id BETWEEN ? AND ?
-                       ORDER BY timestamp LIMIT 20""",
-                    (chat_name, item_id - 10, item_id + 10)
-                ).fetchall()
-                _chat_conn2.close()
-                chat_msgs_data = [dict(m) for m in nearby]
+                chat_name = ""
+                chat_msgs_data = []
+                if chat_msg:
+                    chat_name = chat_msg["chat_name"] or ""
+                    # Window-function: rank rows by (timestamp, id) within
+                    # the chat, find the target's rank, then take ±10 by
+                    # rank. Ties broken by id so rank is deterministic.
+                    nearby = _conn.execute(
+                        """WITH ranked AS (
+                             SELECT *, ROW_NUMBER() OVER (
+                                 ORDER BY timestamp, id
+                             ) AS rn
+                             FROM chat_messages
+                             WHERE chat_name = ?
+                           ),
+                           target AS (
+                             SELECT rn FROM ranked WHERE id = ?
+                           )
+                           SELECT r.* FROM ranked r, target t
+                           WHERE r.rn BETWEEN t.rn - 10 AND t.rn + 10
+                           ORDER BY r.rn""",
+                        (chat_name, item_id),
+                    ).fetchall()
+                    chat_msgs_data = [dict(m) for m in nearby]
 
             toc_items.append({
                 "exhibit_label": exhibit_label,
