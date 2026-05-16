@@ -818,7 +818,35 @@ class Database:
             return dict(row) if row else None
 
     def delete_account(self, account_id: int):
+        """Delete an account, its emails, AND every polymorphic record
+        that pointed at those emails (evidence_tags/annotations/evidence
+        with item_type/source_table = 'email' or 'emails'). Without
+        this cleanup, the Case Theory Workbench retains arguments
+        whose evidence rows resolve to `[source row deleted]`.
+        """
         with self._get_conn() as conn:
+            email_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM emails WHERE account_id = ?", (account_id,)
+            ).fetchall()]
+            if email_ids:
+                placeholders = ",".join("?" * len(email_ids))
+                conn.execute(
+                    f"DELETE FROM evidence_tags "
+                    f"WHERE item_type = 'email' AND item_id IN ({placeholders})",
+                    email_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM annotations "
+                    f"WHERE item_type = 'email' AND item_id IN ({placeholders})",
+                    email_ids,
+                )
+                # Case Theory `evidence` rows reference by (source_table,
+                # source_row_id); argument_evidence cascades from there.
+                conn.execute(
+                    f"DELETE FROM evidence "
+                    f"WHERE source_table = 'emails' AND source_row_id IN ({placeholders})",
+                    email_ids,
+                )
             conn.execute("DELETE FROM emails WHERE account_id = ?", (account_id,))
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
 
@@ -1397,15 +1425,39 @@ class Database:
             return [dict(r) for r in rows]
 
     def delete_chat_import(self, import_id: int):
-        """Delete a chat import and all its messages."""
+        """Delete a chat import + its messages + their dependents.
+
+        evidence_tags and annotations are polymorphic (item_type='chat',
+        item_id=chat_messages.id) so SQLite can't auto-cascade them
+        from a chat_messages delete. The exhibit bundle later queries
+        these tags by case_id, finds them, tries to load the message,
+        gets nothing, and silently skips — leaving TOC gaps in a court
+        filing. Clean them up here in the same transaction.
+        """
         with self._get_conn() as conn:
             imp = conn.execute(
                 "SELECT source_file FROM chat_imports WHERE id = ?", (import_id,)
             ).fetchone()
             if imp:
+                msg_ids = [r["id"] for r in conn.execute(
+                    "SELECT id FROM chat_messages WHERE source_file = ?",
+                    (imp["source_file"],),
+                ).fetchall()]
+                if msg_ids:
+                    placeholders = ",".join("?" * len(msg_ids))
+                    conn.execute(
+                        f"DELETE FROM evidence_tags "
+                        f"WHERE item_type = 'chat' AND item_id IN ({placeholders})",
+                        msg_ids,
+                    )
+                    conn.execute(
+                        f"DELETE FROM annotations "
+                        f"WHERE item_type = 'chat' AND item_id IN ({placeholders})",
+                        msg_ids,
+                    )
                 conn.execute(
                     "DELETE FROM chat_messages WHERE source_file = ?",
-                    (imp["source_file"],)
+                    (imp["source_file"],),
                 )
             conn.execute("DELETE FROM chat_imports WHERE id = ?", (import_id,))
 
