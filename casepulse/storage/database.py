@@ -1538,18 +1538,21 @@ class Database:
             conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
 
     def get_next_exhibit_number(self, case_id: int) -> int:
+        """Atomically claim the next exhibit number for this case.
+
+        Two concurrent callers would previously read the same value
+        before either incremented it, producing duplicate exhibit
+        labels — a court-bundle inadmissibility risk. Uses a single
+        UPDATE ... RETURNING statement (SQLite 3.35+) so the read and
+        the increment happen under one write lock.
+        """
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT next_exhibit_num FROM cases WHERE id = ?", (case_id,)
+                "UPDATE cases SET next_exhibit_num = next_exhibit_num + 1 "
+                "WHERE id = ? RETURNING next_exhibit_num - 1 AS claimed",
+                (case_id,),
             ).fetchone()
-            if row:
-                num = row["next_exhibit_num"]
-                conn.execute(
-                    "UPDATE cases SET next_exhibit_num = ? WHERE id = ?",
-                    (num + 1, case_id)
-                )
-                return num
-            return 1
+            return row["claimed"] if row else 1
 
     # ── Evidence tag operations ──
 
