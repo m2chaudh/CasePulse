@@ -324,7 +324,26 @@ def _compute_source_hash(db: Database, source_table: str,
     senders send the same text in the same chat.
 
     For all other source tables, sha256(primary_text_column) is used.
+
+    `source_table` is interpolated into SQL via f-string (sqlite doesn't
+    accept table names as parameters), so it MUST be matched against a
+    fixed allowlist below — never accept a free-form caller-supplied
+    value here. The existing Evidence rows store `source_table` as a
+    plain TEXT column so a future UI / import path could surface an
+    unexpected string here.
     """
+    # Fixed (table → primary text column) allowlist. Updating this is a
+    # deliberate schema change; never derive it from input.
+    _TEXT_COLS = {
+        "chat_messages": None,   # handled by the special-case above
+        "emails": "body_text",
+        "attachments": "extracted_text",
+        "documents": "extracted_text",
+        "annotations": "note_text",
+    }
+    if source_table not in _TEXT_COLS:
+        return None
+
     with db._get_conn() as conn:
         cur = conn.cursor()
 
@@ -341,15 +360,7 @@ def _compute_source_hash(db: Database, source_table: str,
                 f"{ts or ''}|{sender or ''}|{text or ''}".encode("utf-8")
             ).hexdigest()
 
-        text_cols = {
-            "emails": "body_text",
-            "attachments": "extracted_text",
-            "documents": "extracted_text",
-            "annotations": "note_text",
-        }
-        col = text_cols.get(source_table)
-        if not col:
-            return None
+        col = _TEXT_COLS[source_table]  # safe: matched against allowlist
         cur.execute(f"SELECT {col} FROM {source_table} WHERE id = ?",
                     (source_row_id,))
         row = cur.fetchone()

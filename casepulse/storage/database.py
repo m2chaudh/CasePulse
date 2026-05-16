@@ -784,9 +784,41 @@ class Database:
         # Commit handled by the `with self._get_conn()` context manager
         # in _run_migrations — any error inside this method rolls back.
 
+    # FTS backfill identifiers must match an allowlist before being
+    # interpolated into SQL (SQLite doesn't parameterise table or column
+    # names). All current callers pass hardcoded strings, but defending
+    # at the helper means a future caller can't accidentally widen the
+    # surface.
+    _FTS_BACKFILL_ALLOW = {
+        "emails_fts":         ("emails",         {"subject", "body_text"}),
+        "chat_messages_fts":  ("chat_messages",  {"message_text", "sender", "chat_name"}),
+        "attachments_fts":    ("attachments",    {"filename", "extracted_text"}),
+        "documents_fts":      ("documents",      {"filename", "extracted_text"}),
+        "annotations_fts":    ("annotations",    {"note_text"}),
+    }
+
     def _backfill_fts_if_empty(self, cur, fts_table: str, source_table: str,
                                 select_cols: list) -> None:
         """Backfill an FTS5 contentless table from its source table if under-indexed."""
+        allowed = self._FTS_BACKFILL_ALLOW.get(fts_table)
+        if not allowed:
+            raise ValueError(
+                f"_backfill_fts_if_empty: unknown fts_table {fts_table!r}"
+            )
+        expected_source, allowed_cols = allowed
+        if source_table != expected_source:
+            raise ValueError(
+                f"_backfill_fts_if_empty: source_table {source_table!r} "
+                f"does not match allowlist for {fts_table!r} "
+                f"(expected {expected_source!r})"
+            )
+        unknown = set(select_cols) - allowed_cols
+        if unknown:
+            raise ValueError(
+                f"_backfill_fts_if_empty: column(s) {sorted(unknown)} "
+                f"not in allowlist for {fts_table!r}"
+            )
+
         cur.execute(f"SELECT COUNT(*) FROM {fts_table}")
         fts_count = cur.fetchone()[0]
         cur.execute(f"SELECT COUNT(*) FROM {source_table}")
